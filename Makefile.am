@@ -9,7 +9,8 @@ SUBDIRS = @platform_with_platform@ \
 	  helper/test \
 	  doc \
 	  example . \
-	  test
+	  test \
+	  mdev
 
 @DX_RULES@
 

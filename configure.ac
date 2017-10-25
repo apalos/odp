@@ -171,6 +171,7 @@ m4_include([./doc/m4/configure.m4])
 m4_include([./example/m4/configure.m4])
 m4_include([./helper/m4/configure.m4])
 m4_include([./test/m4/configure.m4])
+m4_include([./mdev/m4/configure.m4])
 
 ##########################################################################
 # Set SDK install path
@@ -361,6 +362,7 @@ AC_CONFIG_FILES([Makefile
 		 pkgconfig/libodp-linux.pc
 		 pkgconfig/libodp-dpdk.pc
 		 pkgconfig/libodphelper.pc
+		 pkgconfig/mdev.pc
 		 ])
 
 ##########################################################################
@@ -411,4 +413,5 @@ AC_MSG_RESULT([
 	test_helper:		${test_helper}
 	test_example:		${test_example}
 	user_guides:		${user_guides}
+	mdev:		${mdev}
 ])
