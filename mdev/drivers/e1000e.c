@@ -1,11 +1,13 @@
-
+#include <odp_posix_extensions.h>
 #include <stdio.h>
 #include <endian.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
 #include <linux/types.h>
-#include <odp/drv/spec/byteorder.h>
+
+#include <odp/drv/byteorder.h>
+#include <odp/api/hints.h>
 
 #include <drivers/driver_ops.h>
 #include <mm_api.h>
@@ -16,12 +18,14 @@ extern void *bar0;
 
 /* Common code. TODO: relocate */
 #if 1
-#define COMPILER_BARRIER() asm volatile("" ::: "memory")
-#define MEMORY_BARRIER() asm volatile ("mfence" ::: "memory")
-#define STORE_BARRIER() asm volatile ("sfence" ::: "memory")
-#define LOAD_BARRIER() asm volatile ("lfence" ::: "memory")
-#define dma_wmb() STORE_BARRIER()
-#define dma_rmb() LOAD_BARRIER()
+//#define COMPILER_BARRIER() asm volatile("" ::: "memory")
+//#define MEMORY_BARRIER() asm volatile ("mfence" ::: "memory")
+//#define STORE_BARRIER() asm volatile ("sfence" ::: "memory")
+//#define LOAD_BARRIER() asm volatile ("lfence" ::: "memory")
+//#define dma_wmb() STORE_BARRIER()
+//#define dma_rmb() LOAD_BARRIER()
+#define dma_wmb()
+#define dma_rmb()
 #define unlikely(x) (x)
 #endif
 
@@ -95,9 +99,9 @@ typedef union e1000e_rx_desc {
 } e1000e_rx_desc_t;
 
 /* Common code. TODO: relocate */
-#if 1
 typedef unsigned long dma_addr_t;
 
+#if 0
 static void print_packet(unsigned char *buffer)
 {
 	int i;
@@ -137,7 +141,7 @@ static int e1000e_rx_fill(void *rxring, struct iomem data,
 	return 0;
 }
 
-static void e1000e_recv(void *rxring, char *rx_buff[], volatile void *ioaddr)
+static void e1000e_recv(void *rxring, char *rx_buff[] ODP_UNUSED, volatile void *ioaddr)
 {
 	e1000e_rx_desc_t *rx_ring = (e1000e_rx_desc_t *)rxring;
 	int i = 0;
@@ -169,7 +173,7 @@ static void e1000e_recv(void *rxring, char *rx_buff[], volatile void *ioaddr)
 				int pkt_size = odpdrv_le_to_cpu_16(rx_desc->wb.upper.length);
 
 				printf("desc[%03d]: size= %5d ", i, pkt_size);
-				print_packet((unsigned char *)rx_buff[i]);
+				//print_packet((unsigned char *)rx_buff[i]);
 				printf("\n");
 			}
 			/* release_descriptor: */
@@ -219,7 +223,7 @@ static void e1000e_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 		dma_wmb();
 
 		printf("Triggering xmit of dummy packet\n");
-		print_packet((unsigned char *) tx_buff);
+		//print_packet((unsigned char *) tx_buff);
 
 #if 0
 		printf("tx_desc->buffer_addr == 0x%016lx\n",
