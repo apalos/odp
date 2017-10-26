@@ -1,6 +1,5 @@
 #include <odp_posix_extensions.h>
 #include <stdio.h>
-#include <endian.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
@@ -14,16 +13,8 @@
 #include <vfio_api.h>
 #include <reg_api.h>
 
-extern void *bar0;
-
 /* Common code. TODO: relocate */
 #if 1
-//#define COMPILER_BARRIER() asm volatile("" ::: "memory")
-//#define MEMORY_BARRIER() asm volatile ("mfence" ::: "memory")
-//#define STORE_BARRIER() asm volatile ("sfence" ::: "memory")
-//#define LOAD_BARRIER() asm volatile ("lfence" ::: "memory")
-//#define dma_wmb() STORE_BARRIER()
-//#define dma_rmb() LOAD_BARRIER()
 #define dma_wmb()
 #define dma_rmb()
 #define unlikely(x) (x)
@@ -101,22 +92,6 @@ typedef union e1000e_rx_desc {
 /* Common code. TODO: relocate */
 typedef unsigned long dma_addr_t;
 
-#if 0
-static void print_packet(unsigned char *buffer)
-{
-	int i;
-	printf("%02x:%02x:%02x:%02x:%02x:%02x -> %02x:%02x:%02x:%02x:%02x:%02x [%04x]:",
-		buffer[6], buffer[7], buffer[8], buffer[9], buffer[10], buffer[11],
-		buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5],
-		be16toh(*((uint16_t*)(&buffer[12])))
-	);
-
-	for (i = 14; i < 32; i++) {
-		printf("%02x", buffer[i]);
-	}
-}
-#endif
-
 static void e1000e_rx_desc_push(e1000e_rx_desc_t *rx_ring, int idx, dma_addr_t dma_addr,
 				volatile void *ioaddr)
 {
@@ -187,84 +162,11 @@ static void *e1000e_map_mmio(int device, size_t *len)
 	return vfio_mmap_region(device, 0, len);
 }
 
-static void e1000e_xmit(void *txring, struct iomem data, volatile void *ioaddr)
-{
-	/* ARP request packet */
-	static const unsigned char pkt_arp_req[] = {
-		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf4, 0x4d,
-		0x30, 0x64, 0x43, 0xf7, 0x08, 0x06, 0x00, 0x01,
-		0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0xf4, 0x4d,
-		0x30, 0x64, 0x43, 0xf7, 0xc0, 0xa8, 0x00, 0x01,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0xa8,
-		0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00
-	};
-
-	int idx;
-	uint32_t txd_cmd =
-	    E1000_TXD_CMD_IFCS | E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS |
-	    E1000_TXD_CMD_IDE;
-
-	for (idx = 0; idx < 100; idx++) {
-		volatile e1000_tx_desc_t *tx_desc =
-		    (e1000_tx_desc_t *) txring + idx;
-		unsigned char *tx_buff =
-		    (unsigned char *) (data.vaddr + idx * 2048);
-
-		/* XXX FIXME need proper packet size and sizeof(src) *NOT* dst */
-		memcpy((void *)tx_buff, pkt_arp_req, sizeof(pkt_arp_req));
-		tx_desc->buffer_addr =
-		    odpdrv_cpu_to_le_64(data.iova + idx * 2048);
-		tx_desc->lower.data =
-		    odpdrv_cpu_to_le_32(txd_cmd | sizeof(pkt_arp_req));
-		tx_desc->upper.data = odpdrv_cpu_to_le_32(0);
-
-		dma_wmb();
-
-		printf("Triggering xmit of dummy packet\n");
-		//print_packet((unsigned char *) tx_buff);
-
-#if 0
-		printf("tx_desc->buffer_addr == 0x%016lx\n",
-		       tx_desc->buffer_addr);
-		printf("tx_desc->lower == 0x%08x\n", tx_desc->lower.data);
-		printf("tx_desc->upper == 0x%08x\n", tx_desc->upper.data);
-		printf("TDT == 0x%08x\n",
-		       io_read32(ioaddr + E1000_TDT_OFFSET));
-		printf("TDH == 0x%08x\n",
-		       io_read32(ioaddr + E1000_TDH_OFFSET));
-
-		usleep(100 * 1000);
-#endif
-
-		io_write32(odpdrv_cpu_to_le_32(idx + 1),
-			   (volatile char *)ioaddr + E1000_TDT_OFFSET);
-
-		usleep(100 * 1000);
-
-#if 0
-		printf("TDT == 0x%08x\n",
-		       io_read32(ioaddr + E1000_TDT_OFFSET));
-		printf("TDH == 0x%08x\n",
-		       io_read32(ioaddr + E1000_TDH_OFFSET));
-		printf("tx_desc->buffer_addr == 0x%016lx\n",
-		       tx_desc->buffer_addr);
-		printf("tx_desc->lower == 0x%08x\n", tx_desc->lower.data);
-		printf("tx_desc->upper == 0x%08x\n", tx_desc->upper.data);
-#endif
-	}
-
-	return;
-}
-
 const struct driver_ops e1000e_ops = {
 	.vendor = 0x8086,
 	.device = 0xdead,
 	.vfio_quirks = NULL,
 	.rx_fill = e1000e_rx_fill,
 	.recv = e1000e_recv,
-	.xmit = e1000e_xmit,
 	.map_mmio = e1000e_map_mmio,
 };
-
