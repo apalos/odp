@@ -1,4 +1,7 @@
+#include "config.h"
+
 #include <odp_posix_extensions.h>
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdint.h>
@@ -7,6 +10,13 @@
 
 #include <odp/drv/byteorder.h>
 #include <odp/api/hints.h>
+
+#include <odp/api/plat/packet_inlines.h>
+#include <odp/api/packet.h>
+
+#include <odp_packet_io_internal.h>
+
+#include <protocols/eth.h>
 
 #include <drivers/driver_ops.h>
 #include <mm_api.h>
@@ -28,7 +38,9 @@
 #define E1000_TDH_OFFSET 0x03810UL
 #define E1000_TDT_OFFSET 0x03818UL
 
-typedef struct e1000e_tx_desc {
+#define E1000E_TX_BUF_SIZE 2048U
+
+typedef struct {
 	odpdrv_u64le_t buffer_addr;		/* Address of the descriptor's data buffer */
 	union {
 #define E1000_TXD_CMD_EOP	0x01000000	/* End of Packet */
@@ -51,7 +63,7 @@ typedef struct e1000e_tx_desc {
 			odpdrv_u16le_t special;
 		} fields;
 	} upper;
-} e1000_tx_desc_t;
+} e1000e_tx_desc_t;
 
 /* RX ring definitions */
 #define E1000E_RX_RING_SIZE_DEFAULT 256
@@ -61,9 +73,9 @@ typedef struct e1000e_tx_desc {
 #define E1000_RDH_OFFSET 0x02810UL
 #define E1000_RDT_OFFSET 0x02818UL
 
-#define E1000E_RX_BUF_SIZE 2048
+#define E1000E_RX_BUF_SIZE 2048U
 
-typedef union e1000e_rx_desc {
+typedef union {
 	struct {
 		odpdrv_u64le_t buffer_addr;
 		odpdrv_u64le_t reserved;
@@ -88,6 +100,25 @@ typedef union e1000e_rx_desc {
 		} upper;
 	} wb;							/* writeback */
 } e1000e_rx_desc_t;
+
+/** Packet socket using mediated e1000e device */
+typedef struct {
+	odp_pktio_capability_t capa;	/**< interface capabilities */
+
+	volatile uint8_t *mmio;		/**< BAR0 mmap */
+
+	odp_bool_t lockless_rx;		/**< no locking for RX */
+	odp_ticketlock_t rx_lock;	/**< RX ring lock */
+	e1000e_rx_desc_t *rx_ring;	/**< RX ring mmap */
+	struct iomem rx_data;		/**< RX packet payload mmap */
+	uint16_t rx_next;		/**< next entry in RX ring to use */
+
+	odp_bool_t lockless_tx;		/**< no locking for TX */
+	odp_ticketlock_t tx_lock;	/**< TX ring lock */
+	e1000e_tx_desc_t *tx_ring;	/**< TX ring mmap */
+	struct iomem tx_data;		/**< TX packet payload mmap */
+	uint16_t tx_next;		/**< next entry in TX ring to use */
+} pktio_ops_e1000e_data_t;
 
 /* Common code. TODO: relocate */
 typedef unsigned long dma_addr_t;
@@ -160,6 +191,73 @@ static void e1000e_recv(void *rxring, char *rx_buff[] ODP_UNUSED, volatile void 
 static void *e1000e_map_mmio(int device, size_t *len)
 {
 	return vfio_mmap_region(device, 0, len);
+}
+
+int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
+		const odp_packet_t pkt_table[], int num);
+
+int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
+		const odp_packet_t pkt_table[], int num)
+{
+	pktio_ops_e1000e_data_t *pkt_e1000e =
+	    odp_ops_data(pktio_entry, e1000e);
+	int tx_pkts = 0;
+	int budget;
+
+	if (!pkt_e1000e->lockless_tx)
+		odp_ticketlock_lock(&pkt_e1000e->tx_lock);
+
+	/* Determine how much space is available in TX ring */
+	budget =
+	    pkt_e1000e->tx_next + E1000E_TX_RING_SIZE_DEFAULT -
+	    io_read32(pkt_e1000e->mmio + E1000_TDH_OFFSET) - 1;
+
+	while (budget && tx_pkts < num) {
+		volatile e1000e_tx_desc_t *tx_desc =
+		    &pkt_e1000e->tx_ring[pkt_e1000e->tx_next];
+		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
+		uint32_t offset = pkt_e1000e->tx_next * E1000E_TX_BUF_SIZE;
+		uint32_t txd_cmd =
+		    E1000_TXD_CMD_IFCS | E1000_TXD_CMD_EOP |
+		    E1000_TXD_CMD_RS | E1000_TXD_CMD_IDE;
+
+		/* Skip oversized packets silently */
+		if (pkt_len > E1000E_TX_BUF_SIZE) {
+			tx_pkts++;
+			continue;
+		}
+
+		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
+				       pkt_e1000e->tx_data.vaddr + offset);
+
+		tx_desc->buffer_addr =
+		    odp_cpu_to_le_64(pkt_e1000e->tx_data.iova + offset);
+		tx_desc->lower.data = odp_cpu_to_le_32(txd_cmd | pkt_len);
+		tx_desc->upper.data = odp_cpu_to_le_32(0);
+
+		pkt_e1000e->tx_next =
+		    (pkt_e1000e->tx_next +
+		     1) & (E1000E_TX_RING_SIZE_DEFAULT - 1);
+		tx_pkts++;
+		budget--;
+	}
+
+	dma_wmb();
+
+	io_write32(odp_cpu_to_le_32(pkt_e1000e->tx_next),
+		   pkt_e1000e->mmio + E1000_TDT_OFFSET);
+
+	if (!pkt_e1000e->lockless_tx)
+		odp_ticketlock_unlock(&pkt_e1000e->tx_lock);
+
+	if (odp_unlikely(tx_pkts == 0)) {
+		if (__odp_errno != 0)
+			return -1;
+	} else {
+		odp_packet_free_multi(pkt_table, tx_pkts);
+	}
+
+	return tx_pkts;
 }
 
 const struct driver_ops e1000e_ops = {

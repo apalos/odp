@@ -308,10 +308,10 @@ int iomem_alloc_dma(int device, unsigned int size, void **iomem_current,
 
 	*iomem_current = (char *)*iomem_current + size;
 
-	iomem->vaddr = (__u64)tmp;
+	iomem->vaddr = tmp;
 	iomem->size = size;
 
-	dma_map.vaddr = iomem->vaddr;
+	dma_map.vaddr = (__u64)iomem->vaddr;
 	dma_map.size = iomem->size;
 	dma_map.flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE;
 
@@ -321,7 +321,7 @@ int iomem_alloc_dma(int device, unsigned int size, void **iomem_current,
 		return -ENOMEM;
 	iomem->iova = dma_map.iova;
 
-	printf("iomem_alloc: VA(%llx) -> physmem(%dKB) <- IOVA(%llx)\n",
+	printf("iomem_alloc: VA(%p) -> physmem(%dKB) <- IOVA(%llx)\n",
 	       iomem->vaddr, size/1024, iomem->iova);
 
 	return 0;
