@@ -7,12 +7,10 @@
 #define TO_GB(x) (x * 1024ULL * 1024ULL * 1024ULL)
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
-#define container_of(ptr, type, member) \
-({ \
-	const typeof( ((type *)0)->member ) *__mptr = (ptr); \
-	(type *)( (char *)__mptr - offsetof(type,member)); \
-})
-
+#ifndef odp_container_of
+#define odp_container_of(pointer, type, member) \
+	((type *)(void *)(((char *)pointer) - offsetof(type, member)))
+#endif
 
 static inline int uio_quirks(const struct driver_ops *e)
 {

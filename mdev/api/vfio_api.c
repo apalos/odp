@@ -10,8 +10,11 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include <odp_posix_extensions.h>
+
 #include <common.h>
 #include <uapi/net_mdev.h>
+#include <vfio_api.h>
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 static const char *vfio_fail_str[] = {
@@ -118,7 +121,7 @@ static int vfio_match_caps(struct vfio_info_cap_header *hdr, __u32 type,
 {
 	struct vfio_region_info_cap_type *cap_type;
 
-	cap_type = container_of(hdr, struct vfio_region_info_cap_type, header);
+	cap_type = odp_container_of(hdr, struct vfio_region_info_cap_type, header);
 
 	return !(cap_type->type == type && cap_type->subtype == subtype);
 }
@@ -126,7 +129,7 @@ static int vfio_match_caps(struct vfio_info_cap_header *hdr, __u32 type,
 static int vfio_find_sparse_mmaps(struct vfio_info_cap_header *hdr,
 				  struct vfio_region_info_cap_sparse_mmap **sparse)
 {
-	*sparse = container_of(hdr, struct vfio_region_info_cap_sparse_mmap, header);
+	*sparse = odp_container_of(hdr, struct vfio_region_info_cap_sparse_mmap, header);
 
 	return 0;
 }
@@ -141,7 +144,7 @@ static struct vfio_info_cap_header *vfio_get_region_info_cap(struct vfio_region_
 	if (!(info->flags & VFIO_REGION_INFO_FLAG_CAPS))
 		return NULL;
 
-	for (hdr = ptr + info->cap_offset; hdr != ptr; hdr = ptr + hdr->next) {
+	for (hdr = (struct vfio_info_cap_header *)(char *)ptr + info->cap_offset; hdr != ptr; hdr = (struct vfio_info_cap_header *)(char *)ptr + hdr->next) {
 		if (hdr->id == id)
 			return hdr;
 	}
@@ -154,7 +157,8 @@ static int vfio_get_region_sparse_mmaps(int device, struct vfio_region_info *reg
 	struct vfio_region_info *info;
 	struct vfio_info_cap_header *caps = NULL;
 	struct vfio_region_info_cap_sparse_mmap *sparse;
-	int ret = 0, i;
+	int ret = 0;
+	unsigned int i;
 
 	if (region_info->flags & VFIO_REGION_INFO_FLAG_CAPS &&
 	    region_info->argsz > sizeof(*region_info)) {
@@ -301,7 +305,7 @@ int iomem_alloc_dma(int device, unsigned int size, void **iomem_current,
 	if (tmp == MAP_FAILED)
 		return -ENOMEM;
 
-	*iomem_current += size;
+	*iomem_current = (char *)*iomem_current + size;
 
 	iomem->vaddr = (__u64)tmp;
 	iomem->size = size;

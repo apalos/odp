@@ -128,12 +128,13 @@ static void print_packet(unsigned char *buffer)
 }
 #endif
 
-static void e1000e_rx_desc_push(e1000e_rx_desc_t *rx_ring, int idx, dma_addr_t dma_addr, volatile void *ioaddr)
+static void e1000e_rx_desc_push(e1000e_rx_desc_t *rx_ring, int idx, dma_addr_t dma_addr,
+				volatile void *ioaddr)
 {
 	rx_ring[idx].read.buffer_addr = odpdrv_cpu_to_le_64(dma_addr);
 	dma_wmb();
 
-	io_write32(odpdrv_cpu_to_le_32(idx), ioaddr + E1000_RDT_OFFSET);
+	io_write32(odpdrv_cpu_to_le_32(idx), (volatile char *)ioaddr + E1000_RDT_OFFSET);
 }
 
 static int e1000e_rx_fill(int device, void *rxring, struct iomem data,
@@ -189,12 +190,12 @@ static void e1000e_recv(void *rxring, char *rx_buff[], volatile void *ioaddr)
 	}
 }
 
-void *e1000e_map_mmio(int device, size_t *len)
+static void *e1000e_map_mmio(int device, size_t *len)
 {
 	return vfio_mmap_region(device, 0, len);
 }
 
-void e1000e_xmit(void *txring, struct iomem data, volatile void *ioaddr)
+static void e1000e_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 {
 	/* ARP request packet */
 	static const unsigned char pkt_arp_req[] = {
@@ -246,7 +247,7 @@ void e1000e_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 #endif
 
 		io_write32(odpdrv_cpu_to_le_32(idx + 1),
-			   ioaddr + E1000_TDT_OFFSET);
+			   (volatile char *)ioaddr + E1000_TDT_OFFSET);
 
 		usleep(100 * 1000);
 

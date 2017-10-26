@@ -77,7 +77,7 @@ static int r8169_rx_fill(int device, void *rx_data, struct iomem data,
 	return 0;
 }
 
-void r8169_recv(void *rxring, char *rx_buff[], volatile void *ioaddr)
+static void r8169_recv(void *rxring, char *rx_buff[], volatile void *ioaddr)
 {
 	int i = 0;
 	struct RxDesc *r8169_rxring = (struct RxDesc *)rxring;
@@ -132,7 +132,7 @@ static inline void rtl8169_map_to_asic_tx(struct TxDesc *desc, dma_addr_t mappin
 	desc->addr = cpu_to_le64(mapping);
 }
 
-void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
+static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 {
 	const int idx = 0;
 	__u32 opts[2];
@@ -161,7 +161,7 @@ void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 	return;
 }
 
-void *r8169_map_mmio(int device, size_t *len)
+static void *r8169_map_mmio(int device, size_t *len)
 {
 	void *mmio;
 
