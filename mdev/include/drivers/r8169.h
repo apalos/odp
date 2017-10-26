@@ -15,8 +15,8 @@
 
 #define NUM_TX_DESC     64      /* Number of Tx descriptor registers */
 #define NUM_RX_DESC     256U    /* Number of Rx descriptor registers */
-#define R8169_TX_RING_BYTES     (NUM_TX_DESC * sizeof(struct TxDesc))
-#define R8169_RX_RING_BYTES     (NUM_RX_DESC * sizeof(struct RxDesc))
+#define R8169_TX_RING_BYTES     (NUM_TX_DESC * sizeof(struct r8169_txdesc))
+#define R8169_RX_RING_BYTES     (NUM_RX_DESC * sizeof(struct r8169_rxdesc))
 
 /* drivers/ethernet/realtek/r8169.c */
 enum rtl_registers {
@@ -285,15 +285,15 @@ enum rtl_rx_desc_bit {
 
 #define RsvdMask	0x3fffc000
 
-struct TxDesc {
-	__le32 opts1;
-	__le32 opts2;
-	__le64 addr;
+struct r8169_txdesc {
+	odpdrv_u32le_t opts1;
+	odpdrv_u32le_t opts2;
+	odpdrv_u64le_t addr;
 };
 
-struct RxDesc {
-	__le32 opts1;
-	__le32 opts2;
-	__le64 addr;
+struct r8169_rxdesc {
+	odpdrv_u32le_t opts1;
+	odpdrv_u32le_t opts2;
+	odpdrv_u64le_t addr;
 };
 #endif

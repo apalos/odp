@@ -1,8 +1,10 @@
+
 #include <stdio.h>
 #include <endian.h>
 #include <unistd.h>
 #include <string.h>
-/* Our */
+#include <odp/drv/spec/byteorder.h>
+
 #include <drivers/r8169.h>
 #include <drivers/driver_ops.h>
 #include <mm_api.h>
@@ -40,33 +42,33 @@ static void print_packet(unsigned char *buffer)
 	}
 }
 
-static inline void rtl8169_mark_to_asic(struct RxDesc *desc, __u32 rx_buf_sz)
+static inline void rtl8169_mark_to_asic(struct r8169_rxdesc *desc, __u32 rx_buf_sz)
 {
 	__u32 eor = le32_to_cpu(desc->opts1) & RingEnd;
 
 	/* Force memory writes to complete before releasing descriptor */
 	dma_wmb();
 
-	desc->opts1 = cpu_to_le32(DescOwn | eor | rx_buf_sz);
+	desc->opts1 = odpdrv_cpu_to_le32(DescOwn | eor | rx_buf_sz);
 }
 
-static inline void rtl8169_map_to_asic_rx(struct RxDesc *desc, dma_addr_t mapping,
+static inline void rtl8169_map_to_asic_rx(struct r8169_rxdesc *desc, dma_addr_t mapping,
 					  __u32 rx_buf_sz)
 {
-	desc->addr = cpu_to_le64(mapping);
+	desc->addr = odpdrv_cpu_to_le64(mapping);
 	rtl8169_mark_to_asic(desc, rx_buf_sz);
 }
 
-static inline void rtl8169_mark_as_last_descriptor(struct RxDesc *desc)
+static inline void rtl8169_mark_as_last_descriptor(struct r8169_rxdesc *desc)
 {
-	desc->opts1 |= cpu_to_le32(RingEnd);
+	desc->opts1 |= odpdrv_cpu_to_le32(RingEnd);
 }
 
 static int r8169_rx_fill(void *rx_data, struct iomem data, char *rx_buff[],
 			 volatile void *ioaddr)
 {
 	unsigned int i;
-	struct RxDesc *r8169_rxring = (struct RxDesc *) rx_data;
+	struct r8169_rxdesc *r8169_rxring = (struct RxDesc *) rx_data;
 
 	if (!ioaddr)
 		return -1;
@@ -83,7 +85,7 @@ static int r8169_rx_fill(void *rx_data, struct iomem data, char *rx_buff[],
 static void r8169_recv(void *rxring, char *rx_buff[], volatile void *ioaddr)
 {
 	unsigned int i = 0;
-	struct RxDesc *r8169_rxring = (struct RxDesc *)rxring;
+	struct r8169_rxdesc *r8169_rxring = (struct RxDesc *)rxring;
 
 	if(!ioaddr)
 		return;
@@ -132,10 +134,10 @@ process_pkt:
 	}
 }
 
-static inline void rtl8169_map_to_asic_tx(struct TxDesc *desc, dma_addr_t mapping)
+static inline void rtl8169_map_to_asic_tx(struct r8169_txdesc *desc, dma_addr_t mapping)
 
 {
-	desc->addr = cpu_to_le64(mapping);
+	desc->addr = odpdrv_cpu_to_le64(mapping);
 }
 
 static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
@@ -144,7 +146,7 @@ static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 	__u32 opts[2];
 	__u32 status, len;
 	int entry = 0;
-	struct TxDesc *r8169_txring = (struct TxDesc *)txring;
+	struct r8169_txdesc *r8169_txring = (struct TxDesc *)txring;
 	char *tx_buff = (char *)(data.vaddr + idx * 2048);
 
 	/* XXX FIXME need proper packet size and sizeof(src) *NOT* dst */
@@ -154,13 +156,13 @@ static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 	opts[0] = DescOwn;
 	opts[0] |= FirstFrag | LastFrag;
 	/* FIXME No vlan support */
-	opts[1] = cpu_to_le32(0x00);
+	opts[1] = odpdrv_cpu_to_le32(0x00);
 	/* FIXME get actual packet size */
 	len = sizeof(pkt_udp);
 
 	status = opts[0] | len | (RingEnd * !((entry + 1) % NUM_TX_DESC));
-	r8169_txring->opts1 = cpu_to_le32(status);
-	r8169_txring->opts2 = cpu_to_le32(opts[1]);
+	r8169_txring->opts1 = odpdrv_cpu_to_le32(status);
+	r8169_txring->opts2 = odpdrv_cpu_to_le32(opts[1]);
 	io_write8(NPQ, (volatile char *)ioaddr + TxPoll);
 
 	return;

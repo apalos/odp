@@ -1,9 +1,11 @@
+
 #include <stdio.h>
 #include <endian.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
 #include <linux/types.h>
+#include <odp/drv/spec/byteorder.h>
 
 #include <drivers/driver_ops.h>
 #include <mm_api.h>
@@ -14,23 +16,6 @@ extern void *bar0;
 
 /* Common code. TODO: relocate */
 #if 1
-/* TODO: move to API or use ODP headers */
-typedef uint16_t odpdrv_u16le_t;
-typedef uint16_t odpdrv_u16be_t;
-
-typedef uint32_t odpdrv_u32le_t;
-typedef uint32_t odpdrv_u32be_t;
-
-typedef uint64_t odpdrv_u64le_t;
-typedef uint64_t odpdrv_u64be_t;
-
-#define odpdrv_cpu_to_le_64(value) (value)
-#define odpdrv_cpu_to_le_32(value) (value)
-#define odpdrv_cpu_to_le_16(value) (value)
-#define odpdrv_le_to_cpu_64(value) (value)
-#define odpdrv_le_to_cpu_32(value) (value)
-#define odpdrv_le_to_cpu_16(value) (value)
-
 #define COMPILER_BARRIER() asm volatile("" ::: "memory")
 #define MEMORY_BARRIER() asm volatile ("mfence" ::: "memory")
 #define STORE_BARRIER() asm volatile ("sfence" ::: "memory")
