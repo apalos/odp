@@ -8,8 +8,8 @@ struct driver_ops {
 	/* VFIO/PCI quirks */
 	int (*vfio_quirks)(void);
 	/* prepare Rx descriptors */
-	int (*rx_fill)(int device, void *rxring, struct iomem data,
-		       char *rx_buf[], volatile void *iomem);
+	int (*rx_fill)(void *rxring, struct iomem data, char *rx_buf[],
+		       volatile void *iomem);
 	/* receive */
 	void (*recv)(void *rxring, char *rxbuffers[], volatile void *iomem);
 	/* xmit */

@@ -137,7 +137,7 @@ static void e1000e_rx_desc_push(e1000e_rx_desc_t *rx_ring, int idx, dma_addr_t d
 	io_write32(odpdrv_cpu_to_le_32(idx), (volatile char *)ioaddr + E1000_RDT_OFFSET);
 }
 
-static int e1000e_rx_fill(int device, void *rxring, struct iomem data,
+static int e1000e_rx_fill(void *rxring, struct iomem data,
 			   char *rx_buff[], volatile void *ioaddr)
 {
 	e1000e_rx_desc_t *rx_ring = (e1000e_rx_desc_t *)rxring;
@@ -156,6 +156,9 @@ static void e1000e_recv(void *rxring, char *rx_buff[], volatile void *ioaddr)
 {
 	e1000e_rx_desc_t *rx_ring = (e1000e_rx_desc_t *)rxring;
 	int i = 0;
+
+	if (!ioaddr)
+		return;
 
 	while (1) {
 		if (i >= E1000E_RX_RING_SIZE_DEFAULT)
@@ -217,11 +220,11 @@ static void e1000e_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 	for (idx = 0; idx < 100; idx++) {
 		volatile e1000_tx_desc_t *tx_desc =
 		    (e1000_tx_desc_t *) txring + idx;
-		volatile unsigned char *tx_buff =
+		unsigned char *tx_buff =
 		    (unsigned char *) (data.vaddr + idx * 2048);
 
 		/* XXX FIXME need proper packet size and sizeof(src) *NOT* dst */
-		memcpy((void *) tx_buff, pkt_arp_req, sizeof(pkt_arp_req));
+		memcpy((void *)tx_buff, pkt_arp_req, sizeof(pkt_arp_req));
 		tx_desc->buffer_addr =
 		    odpdrv_cpu_to_le_64(data.iova + idx * 2048);
 		tx_desc->lower.data =
@@ -231,7 +234,7 @@ static void e1000e_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 		dma_wmb();
 
 		printf("Triggering xmit of dummy packet\n");
-		print_packet((void *) tx_buff);
+		print_packet((unsigned char *) tx_buff);
 
 #if 0
 		printf("tx_desc->buffer_addr == 0x%016lx\n",

@@ -51,7 +51,7 @@ static inline void rtl8169_mark_to_asic(struct RxDesc *desc, __u32 rx_buf_sz)
 }
 
 static inline void rtl8169_map_to_asic_rx(struct RxDesc *desc, dma_addr_t mapping,
-	__u32 rx_buf_sz)
+					  __u32 rx_buf_sz)
 {
 	desc->addr = cpu_to_le64(mapping);
 	rtl8169_mark_to_asic(desc, rx_buf_sz);
@@ -62,11 +62,14 @@ static inline void rtl8169_mark_as_last_descriptor(struct RxDesc *desc)
 	desc->opts1 |= cpu_to_le32(RingEnd);
 }
 
-static int r8169_rx_fill(int device, void *rx_data, struct iomem data,
-			   char *rx_buff[], volatile void *ioaddr)
+static int r8169_rx_fill(void *rx_data, struct iomem data, char *rx_buff[],
+			 volatile void *ioaddr)
 {
-	int i;
+	unsigned int i;
 	struct RxDesc *r8169_rxring = (struct RxDesc *) rx_data;
+
+	if (!ioaddr)
+		return -1;
 
 	for (i = 0; i < NUM_RX_DESC; i++) {
 		rtl8169_map_to_asic_rx(&r8169_rxring[i], data.iova + i * 2048, 2048);
@@ -79,8 +82,11 @@ static int r8169_rx_fill(int device, void *rx_data, struct iomem data,
 
 static void r8169_recv(void *rxring, char *rx_buff[], volatile void *ioaddr)
 {
-	int i = 0;
+	unsigned int i = 0;
 	struct RxDesc *r8169_rxring = (struct RxDesc *)rxring;
+
+	if(!ioaddr)
+		return;
 
 	while (1) {
 		if (i >= NUM_RX_DESC)
@@ -126,8 +132,8 @@ process_pkt:
 	}
 }
 
-static inline void rtl8169_map_to_asic_tx(struct TxDesc *desc, dma_addr_t mapping,
-					  __u32 rx_buf_sz)
+static inline void rtl8169_map_to_asic_tx(struct TxDesc *desc, dma_addr_t mapping)
+
 {
 	desc->addr = cpu_to_le64(mapping);
 }
@@ -143,8 +149,7 @@ static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 
 	/* XXX FIXME need proper packet size and sizeof(src) *NOT* dst */
 	memcpy(tx_buff, pkt_udp, sizeof(pkt_udp));
-	rtl8169_map_to_asic_tx(&r8169_txring[idx], data.iova + idx * 2048,
-			       2048);
+	rtl8169_map_to_asic_tx(&r8169_txring[idx], data.iova + idx * 2048);
 	/* FIXME no fragmentation support */
 	opts[0] = DescOwn;
 	opts[0] |= FirstFrag | LastFrag;
@@ -156,7 +161,7 @@ static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 	status = opts[0] | len | (RingEnd * !((entry + 1) % NUM_TX_DESC));
 	r8169_txring->opts1 = cpu_to_le32(status);
 	r8169_txring->opts2 = cpu_to_le32(opts[1]);
-	io_write8(NPQ, ioaddr + TxPoll);
+	io_write8(NPQ, (volatile char *)ioaddr + TxPoll);
 
 	return;
 }

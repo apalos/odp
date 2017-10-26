@@ -20,12 +20,12 @@ static inline int uio_quirks(const struct driver_ops *e)
 	return 0;
 }
 
-static inline int uio_rx_fill(const struct driver_ops *e, int device,
-			      void *rxring, struct iomem data, char *rx_buf[],
+static inline int uio_rx_fill(const struct driver_ops *e, void *rxring,
+			      struct iomem data, char *rx_buf[],
 			      volatile void *ioaddr)
 {
 	if (e && e->rx_fill)
-		return e->rx_fill(device, rxring, data, rx_buf, ioaddr);
+		return e->rx_fill(rxring, data, rx_buf, ioaddr);
 
 	return 0;
 }
