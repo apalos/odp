@@ -1,3 +1,8 @@
+/*
+ * FIXME: add a macro to increment ring index module ring size.
+ * FIXME: support variable ring size.
+ */
+
 #include "config.h"
 
 #include <odp_posix_extensions.h>
@@ -27,7 +32,8 @@
 #if 1
 #define dma_wmb()
 #define dma_rmb()
-#define unlikely(x) (x)
+
+typedef unsigned long dma_addr_t;
 #endif
 
 /* TX ring definitions */
@@ -103,6 +109,7 @@ typedef union {
 
 /** Packet socket using mediated e1000e device */
 typedef struct {
+	/* TODO: cache align everything when we have profiling information */
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
 	volatile uint8_t *mmio;		/**< BAR0 mmap */
@@ -112,92 +119,161 @@ typedef struct {
 	e1000e_rx_desc_t *rx_ring;	/**< RX ring mmap */
 	struct iomem rx_data;		/**< RX packet payload mmap */
 	uint16_t rx_next;		/**< next entry in RX ring to use */
+	// rx_tail, rx_head ? (mmio + offset)
 
 	odp_bool_t lockless_tx;		/**< no locking for TX */
 	odp_ticketlock_t tx_lock;	/**< TX ring lock */
 	e1000e_tx_desc_t *tx_ring;	/**< TX ring mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
 	uint16_t tx_next;		/**< next entry in TX ring to use */
+	// tx_tail, tx_head ? (mmio + offset)
 } pktio_ops_e1000e_data_t;
 
-/* Common code. TODO: relocate */
-typedef unsigned long dma_addr_t;
+static void e1000e_rx_ring_refill(pktio_entry_t * pktio_entry,
+				  uint16_t from, uint16_t num);
 
-static void e1000e_rx_desc_push(e1000e_rx_desc_t *rx_ring, int idx, dma_addr_t dma_addr,
-				volatile void *ioaddr)
+static int e1000e_open(odp_pktio_t id ODP_UNUSED,
+		       pktio_entry_t *pktio_entry,
+		       const char *netdev, odp_pool_t pool ODP_UNUSED)
 {
-	rx_ring[idx].read.buffer_addr = odpdrv_cpu_to_le_64(dma_addr);
-	dma_wmb();
+	pktio_ops_e1000e_data_t *pkt_e1000e =
+	    odp_ops_data(pktio_entry, e1000e);
 
-	io_write32(odpdrv_cpu_to_le_32(idx), (volatile char *)ioaddr + E1000_RDT_OFFSET);
-}
+	printf("e1000e: open %s\n", netdev);
 
-static int e1000e_rx_fill(void *rxring, struct iomem data,
-			   char *rx_buff[], volatile void *ioaddr)
-{
-	e1000e_rx_desc_t *rx_ring = (e1000e_rx_desc_t *)rxring;
-	int i;
+	/* Init pktio entry */
+	memset(pkt_e1000e, 0, sizeof(*pkt_e1000e));
 
-	/* TODO: support variable rx_ring size, configuration via ethtool */
-	for (i = 0; i < E1000E_RX_RING_SIZE_DEFAULT; i++) {
-		rx_buff[i] = (char *)(data.vaddr + i * E1000E_RX_BUF_SIZE);
-		e1000e_rx_desc_push(rx_ring, i, data.iova + i * E1000E_RX_BUF_SIZE, ioaddr);
-	}
+	pkt_e1000e->capa.max_input_queues = 1;
+	pkt_e1000e->capa.max_output_queues = 1;
+
+	odp_ticketlock_init(&pkt_e1000e->rx_lock);
+	odp_ticketlock_init(&pkt_e1000e->tx_lock);
+
+	// pkt_e1000e->mmio = vfio_mmap_region(device, 0, len);
+
+	// pkt_e1000e->rx_ring = vfio_mmap_region();
+	// iomem_alloc_dma(fd, &pkt_e1000e->rx_data);
+
+	e1000e_rx_ring_refill(pktio_entry, 0,
+			      E1000E_RX_RING_SIZE_DEFAULT - 1);
+
+	// pkt_e1000e->tx_ring = vfio_mmap_region();
+	// iomem_alloc_dma(fd, &pkt_e1000e->tx_data);
+
+	// TODO: do we need to pass len to vfio_mmap_region ?
+	// TODO: we shall pass only 2 params to iomem_alloc_dma():
+	// int fd
+	// struct iomem *iomem
+	// Requested size can be in iomem->size
+	// The function will fill in vaddr and iova.
+	// iomem_current is supposedly global, so why pass it here ?
+
+	// call common code: transition complete
 
 	return 0;
 }
 
-static void e1000e_recv(void *rxring, char *rx_buff[] ODP_UNUSED, volatile void *ioaddr)
+static int e1000e_close(pktio_entry_t *pktio_entry ODP_UNUSED)
 {
-	e1000e_rx_desc_t *rx_ring = (e1000e_rx_desc_t *)rxring;
-	int i = 0;
+	return 0;
+}
 
-	if (!ioaddr)
-		return;
+static void e1000e_rx_ring_refill(pktio_entry_t * pktio_entry,
+				  uint16_t from, uint16_t num)
+{
+	pktio_ops_e1000e_data_t *pkt_e1000e =
+	    odp_ops_data(pktio_entry, e1000e);
+	uint16_t i = from;
 
-	while (1) {
-		if (i >= E1000E_RX_RING_SIZE_DEFAULT)
+	while (num) {
+		e1000e_rx_desc_t *rx_desc = &pkt_e1000e->rx_ring[i];
+		dma_addr_t dma_addr =
+		    pkt_e1000e->rx_data.iova + i * E1000E_RX_BUF_SIZE;
+
+		rx_desc->read.buffer_addr = odpdrv_cpu_to_le_64(dma_addr);
+		// rx_desc->read.reserved
+		// rx_desc->wb
+
+		i++;
+		if (i == E1000E_RX_RING_SIZE_DEFAULT)
 			i = 0;
-		for (; i < E1000E_RX_RING_SIZE_DEFAULT; i++) {
-			e1000e_rx_desc_t *rx_desc = rx_ring + i;
-			uint32_t status = odpdrv_le_to_cpu_32(rx_desc->wb.upper.status_error);
-
-			if (!(status & E1000E_RX_DESC_STAT_DONE)) {
-				usleep(100*1000);
-				break;
-			}
-
-			/* This barrier is needed to keep us from reading
-			* any other fields out of the Rx descriptor until
-			* we know the status of DescOwn
-			*/
-			dma_rmb();
-
-			if (unlikely(status & E1000E_RX_DESC_STAT_ERR_MASK)) {
-				printf("Rx ERROR. status = %08x\n", status);
-			} else {
-				int pkt_size = odpdrv_le_to_cpu_16(rx_desc->wb.upper.length);
-
-				printf("desc[%03d]: size= %5d ", i, pkt_size);
-				//print_packet((unsigned char *)rx_buff[i]);
-				printf("\n");
-			}
-			/* release_descriptor: */
-			// e1000e_rx_desc_push(rx_ring, i, data.iova + i * E1000E_RX_BUF_SIZE);
-		}
+		num--;
 	}
+
+	dma_wmb();
+
+	io_write32(odpdrv_cpu_to_le_32(i),
+		   pkt_e1000e->mmio + E1000_RDT_OFFSET);
 }
 
-static void *e1000e_map_mmio(int device, size_t *len)
+static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
+		       odp_packet_t pkt_table[], int num)
 {
-	return vfio_mmap_region(device, 0, len);
+	pktio_ops_e1000e_data_t *pkt_e1000e =
+	    odp_ops_data(pktio_entry, e1000e);
+	uint16_t budget;
+	int rx_pkts = 0;
+
+	/* Determine how many outstanding RX packets are there */
+	budget = 0;		// (RDT - RDH) modulo RX_RING_SIZE
+
+	if (budget > num)
+		budget = num;
+
+	budget =
+	    packet_alloc_multi(NULL /* pool */ , E1000E_RX_BUF_SIZE,
+			       pkt_table, budget);
+
+	while (rx_pkts < budget) {
+		volatile e1000e_rx_desc_t *rx_desc =
+		    &pkt_e1000e->rx_ring[pkt_e1000e->rx_next];
+		odp_packet_hdr_t *pkt_hdr;
+		odp_packet_t pkt;
+		uint16_t pkt_len;
+		uint32_t status;
+
+		/* TODO: let the HW drop all erroneous packets */
+		status =
+		    odpdrv_le_to_cpu_32(rx_desc->wb.upper.status_error);
+		if (odp_unlikely(status & E1000E_RX_DESC_STAT_ERR_MASK)) {
+			pkt_e1000e->rx_next++;
+			if (pkt_e1000e->rx_next >=
+			    E1000E_RX_RING_SIZE_DEFAULT)
+				pkt_e1000e->rx_next = 0;
+			odp_packet_free_multi(&pkt_table[rx_pkts],
+					      budget - rx_pkts);
+			break;
+		}
+
+		pkt_len = odpdrv_le_to_cpu_16(rx_desc->wb.upper.length);
+		pkt = pkt_table[rx_pkts];
+		pkt_hdr = odp_packet_hdr(pkt);
+
+		pull_tail(pkt_hdr, E1000E_RX_BUF_SIZE - pkt_len);
+
+		/* FIXME: check return value  */
+		odp_packet_copy_from_mem(pkt, 0, pkt_len,
+					 pkt_e1000e->rx_data.vaddr +
+					 pkt_e1000e->rx_next *
+					 E1000E_RX_BUF_SIZE);
+
+		pkt_hdr->input = pktio_entry->s.handle;
+
+		pkt_e1000e->rx_next++;
+		if (pkt_e1000e->rx_next >= E1000E_RX_RING_SIZE_DEFAULT)
+			pkt_e1000e->rx_next = 0;
+
+		rx_pkts++;
+	}
+
+	// e1000e_rx_ring_refill
+
+	return rx_pkts;
 }
 
-int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
-		const odp_packet_t pkt_table[], int num);
-
-int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
-		const odp_packet_t pkt_table[], int num)
+static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
+		       const odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e =
 	    odp_ops_data(pktio_entry, e1000e);
@@ -212,7 +288,10 @@ int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	    pkt_e1000e->tx_next + E1000E_TX_RING_SIZE_DEFAULT -
 	    io_read32(pkt_e1000e->mmio + E1000_TDH_OFFSET) - 1;
 
-	while (budget && tx_pkts < num) {
+	if (budget > num)
+		budget = num;
+
+	while (budget) {
 		volatile e1000e_tx_desc_t *tx_desc =
 		    &pkt_e1000e->tx_ring[pkt_e1000e->tx_next];
 		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
@@ -235,9 +314,10 @@ int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		tx_desc->lower.data = odp_cpu_to_le_32(txd_cmd | pkt_len);
 		tx_desc->upper.data = odp_cpu_to_le_32(0);
 
-		pkt_e1000e->tx_next =
-		    (pkt_e1000e->tx_next +
-		     1) & (E1000E_TX_RING_SIZE_DEFAULT - 1);
+		pkt_e1000e->tx_next++;
+		if (pkt_e1000e->tx_next >= E1000E_RX_RING_SIZE_DEFAULT)
+			pkt_e1000e->tx_next = 0;
+
 		tx_pkts++;
 		budget--;
 	}
@@ -260,11 +340,14 @@ int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	return tx_pkts;
 }
 
-const struct driver_ops e1000e_ops = {
-	.vendor = 0x8086,
-	.device = 0xdead,
-	.vfio_quirks = NULL,
-	.rx_fill = e1000e_rx_fill,
+static pktio_ops_module_t e1000e_pktio_ops ODP_UNUSED = {
+	.base = {
+		 .name = "e1000e",
+		 },
+
+	.open = e1000e_open,
+	.close = e1000e_close,
+
 	.recv = e1000e_recv,
-	.map_mmio = e1000e_map_mmio,
+	.send = e1000e_send,
 };
