@@ -33,7 +33,7 @@ static const struct cap_to_type_subtype {
 	[VFIO_NET_MDEV_TX_REGION_INDEX] = { VFIO_NET_DESCRIPTORS, VFIO_NET_MDEV_TX },
 };
 
-static void vfio_print_fail(int reason)
+static void vfio_print_fail(unsigned int reason)
 {
 	if (reason > ARRAY_SIZE(vfio_fail_str))
 		printf("Unknown\n");

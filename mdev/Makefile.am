@@ -12,8 +12,8 @@ AM_CPPFLAGS += -I$(top_builddir)/include
 
 AM_LDFLAGS = -version-number '$(ODPHELPER_LIBSO_VERSION)'
 
-mdevincludedir = $(includedir)/mdev/helper/
-mdevinclude_HEADERS = \
+libmdevincludedir = $(includedir)/mdev/helper/
+libmdevinclude_HEADERS = \
 		  $(srcdir)/include/mm_api.h \
 		  $(srcdir)/include/common.h \
 		  $(srcdir)/include/vfio_api.h \
@@ -23,10 +23,16 @@ mdevinclude_HEADERS = \
 
 noinst_HEADERS =
 
-__LIB__libmdev_la_SOURCES = \
+bin_PROGRAMS =mdev$(EXEEXT)
+dist_mdev_SOURCES = \
 					api/mm.c \
 					api/vfio_api.c \
 					drivers/e1000e.c \
 					drivers/r8169.c
+#__LIB__libmdev_la_SOURCES = \
+					#api/mm.c \
+					#api/vfio_api.c \
+					#drivers/e1000e.c \
+					#drivers/r8169.c
 
 lib_LTLIBRARIES =

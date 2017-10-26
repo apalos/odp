@@ -1,6 +1,8 @@
 #ifndef _VFIO_API_H
 #define _VFIO_API_H
 #include <linux/vfio.h>
+int get_container(void);
+int get_group(int grp_id);
 int dma_map_type1(int fd, unsigned long sz, void **vaddr, uint64_t iova);
 int dma_unmap_type1(int fd, unsigned long sz, void *vaddr, uint64_t iova);
 int get_group(int grp_id);
