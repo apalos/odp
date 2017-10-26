@@ -362,7 +362,7 @@ AC_CONFIG_FILES([Makefile
 		 pkgconfig/libodp-linux.pc
 		 pkgconfig/libodp-dpdk.pc
 		 pkgconfig/libodphelper.pc
-		 pkgconfig/mdev.pc
+		 pkgconfig/libodp-mdev.pc
 		 ])
 
 ##########################################################################

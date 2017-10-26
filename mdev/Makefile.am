@@ -15,7 +15,7 @@ AM_LDFLAGS = -version-number '$(ODPHELPER_LIBSO_VERSION)'
 mdevincludedir = $(includedir)/mdev/helper/
 mdevinclude_HEADERS = \
 		  $(srcdir)/include/mm_api.h \
-		  $(srcdir)/include/common.h \ 
+		  $(srcdir)/include/common.h \
 		  $(srcdir)/include/vfio_api.h \
 		  $(srcdir)/include/reg_api.h \
 		  $(srcdir)/include/drivers/driver_ops.h \
