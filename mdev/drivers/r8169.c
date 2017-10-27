@@ -21,7 +21,10 @@
 
 #include <uapi/net_mdev.h>
 
+/* Common code. TODO: relocate */
+#if 1
 typedef unsigned long dma_addr_t;
+#endif
 
 /** Packet socket using mediated r8169 device */
 typedef struct {
@@ -36,108 +39,18 @@ typedef struct {
 	struct r8169_rxdesc *rx_ring;	/**< RX ring mmap */
 	struct iomem rx_data;		/**< RX packet payload mmap */
 	uint16_t rx_next;		/**< next entry in RX ring to use */
-	// rx_tail, rx_head ? (mmio + offset)
 
 	odp_bool_t lockless_tx;		/**< no locking for TX */
 	odp_ticketlock_t tx_lock;	/**< TX ring lock */
 	struct r8169_txdesc *tx_ring;	/**< TX ring mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
 	uint16_t tx_next;		/**< next entry in TX ring to use */
-	// tx_tail, tx_head ? (mmio + offset)
 } pktio_ops_r8169_data_t;
 
-static inline void rtl8169_mark_to_asic(struct r8169_rxdesc *desc, __u32 rx_buf_sz)
-{
-	__u32 eor = odpdrv_le_to_cpu_32(desc->opts1) & RingEnd;
+static void r8169_rx_refill(pktio_entry_t *pktio_entry,
+			    uint16_t from, uint16_t num);
 
-	/* Force memory writes to complete before releasing descriptor */
-	dma_wmb();
-
-	desc->opts1 = odpdrv_cpu_to_le_32(DescOwn | eor | rx_buf_sz);
-}
-
-static inline void rtl8169_map_to_asic_rx(struct r8169_rxdesc *desc, dma_addr_t mapping,
-					  __u32 rx_buf_sz)
-{
-	desc->addr = odpdrv_cpu_to_le_64(mapping);
-	rtl8169_mark_to_asic(desc, rx_buf_sz);
-}
-
-static inline void rtl8169_mark_as_last_descriptor(struct r8169_rxdesc *desc)
-{
-	desc->opts1 |= odpdrv_cpu_to_le_32(RingEnd);
-}
-
-static int ODP_UNUSED r8169_rx_fill(void *rx_data, struct iomem data,
-				    char *rx_buff[], volatile void *ioaddr)
-{
-	unsigned int i;
-	struct r8169_rxdesc *r8169_rxring = (struct r8169_rxdesc *) rx_data;
-
-	if (!ioaddr)
-		return -1;
-
-	for (i = 0; i < NUM_RX_DESC; i++) {
-		rtl8169_map_to_asic_rx(&r8169_rxring[i], data.iova + i * 2048, 2048);
-		rx_buff[i] = (char *)(data.vaddr + i * 2048);
-	}
-	rtl8169_mark_as_last_descriptor(&r8169_rxring[NUM_RX_DESC - 1]);
-
-	return 0;
-}
-
-static void ODP_UNUSED r8169_recv(void *rxring, char *rx_buff[]ODP_UNUSED,
-				  volatile void *ioaddr)
-{
-	unsigned int i = 0;
-	struct r8169_rxdesc *r8169_rxring = (struct r8169_rxdesc *)rxring;
-
-	if (!ioaddr)
-		return;
-
-	while (1) {
-		if (i >= NUM_RX_DESC)
-			i = 0;
-		for (; i < NUM_RX_DESC; i++) {
-			__u32 status;
-
-			status = odpdrv_le_to_cpu_32(r8169_rxring[i].opts1) & ~0; /// either  ~(RxBOVF | RxFOVF) or ~0;
-
-			if (status & DescOwn) {
-				usleep(100*1000);
-				break;
-			}
-			/* This barrier is needed to keep us from reading
-			* any other fields out of the Rx descriptor until
-			* we know the status of DescOwn
-			*/
-			dma_rmb();
-
-			if (odp_unlikely(status & RxRES)) {
-				printf("Rx ERROR. status = %08x\n",status);
-				if ((status & (RxRUNT | RxCRC)) &&
-					!(status & (RxRWT | RxFOVF))
-					/* && 	(dev->features & NETIF_F_RXALL) */
-					)
-					goto process_pkt;
-			} else {
-				int pkt_size;
-process_pkt:
-				if (1) // likely(!(dev->features & NETIF_F_RXFCS)))
-					pkt_size = (status & 0x00003fff) - 4;
-				else
-					pkt_size = status & 0x00003fff;
-
-				printf("desc[%03d]: size= %5d ", i, pkt_size);
-				printf("\n");
-			}
-			/* release_descriptor: */
-			r8169_rxring[i].opts2 = 0;
-			rtl8169_mark_to_asic(&r8169_rxring[i], 2048);
-		}
-	}
-}
-
+#if 0
 static inline void rtl8169_map_to_asic_tx(struct r8169_txdesc *desc, dma_addr_t mapping)
 
 {
@@ -171,29 +84,7 @@ static void ODP_UNUSED r8169_xmit(void *txring, struct iomem data,
 
 	return;
 }
-
-static void r8169_prepare_rx(pktio_entry_t * pktio_entry,
-			     uint16_t from, uint16_t num)
-{
-	pktio_ops_r8169_data_t *pkt_r8169 =
-	    odp_ops_data(pktio_entry, r8169);
-	struct r8169_rxdesc *r8169_rxring;
-	uint16_t i = from;
-
-	while (num && num < NUM_RX_DESC) {
-		r8169_rxring = &pkt_r8169->rx_ring[i];
-		dma_addr_t dma_addr =
-		    pkt_r8169->rx_data.iova + i * R8169_RX_BUF_SIZE;
-		rtl8169_map_to_asic_rx(&r8169_rxring[i], dma_addr, R8169_RX_BUF_SIZE);
-
-		i++;
-		if (i == NUM_RX_DESC)
-			i = 0;
-		num--;
-	}
-
-	rtl8169_mark_as_last_descriptor(&r8169_rxring[NUM_RX_DESC - 1]);
-}
+#endif
 
 static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 		      const char *netdev, odp_pool_t pool ODP_UNUSED)
@@ -282,7 +173,8 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 	if (ret)
 		goto out;
 
-	r8169_prepare_rx(pktio_entry, 0, NUM_RX_DESC);
+	r8169_rx_refill(pktio_entry, 0, NUM_RX_DESC);
+
 	// call common code: transition complete
 
 	return 0;
@@ -309,6 +201,97 @@ static int r8169_close(pktio_entry_t * pktio_entry ODP_UNUSED)
 	return 0;
 }
 
+/* TODO: pass pkt_r8169 */
+static void r8169_rx_refill(pktio_entry_t *pktio_entry,
+			    uint16_t from, uint16_t num)
+{
+	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
+	uint16_t i = from;
+
+	ODP_ASSERT(num <= NUM_RX_DESC);
+
+	while (num) {
+		struct r8169_rxdesc *rx_desc = &pkt_r8169->rx_ring[i];
+		dma_addr_t dma_addr =
+		    pkt_r8169->rx_data.iova + i * R8169_RX_BUF_SIZE;
+		uint32_t opts1;
+
+		rx_desc->addr = odpdrv_cpu_to_le_64(dma_addr);
+		rx_desc->opts2 = odpdrv_cpu_to_le_32(0);
+
+		if (odp_likely(i < NUM_RX_DESC - 1)) {
+			opts1 = DescOwn | R8169_RX_BUF_SIZE;
+			i++;
+		} else {
+			opts1 = DescOwn | R8169_RX_BUF_SIZE | RingEnd;
+			i = 0;
+		}
+		num--;
+
+		dma_wmb();
+		rx_desc->opts1 = odpdrv_cpu_to_le_32(opts1);
+	}
+}
+
+static int r8169_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
+		      odp_packet_t pkt_table[], int num)
+{
+	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
+	uint16_t refill_from;
+	int rx_pkts = 0;
+
+	/* Keep track of the start point to refill RX ring */
+	refill_from = pkt_r8169->rx_next;
+
+	while (rx_pkts < num) {
+		struct r8169_rxdesc *rx_desc =
+		    &pkt_r8169->rx_ring[pkt_r8169->rx_next];
+		odp_packet_hdr_t *pkt_hdr;
+		odp_packet_t pkt;
+		uint16_t pkt_len;
+		uint32_t status;
+
+		status = odpdrv_le_to_cpu_32(rx_desc->opts1);
+		if (status & DescOwn)
+			break;
+
+		dma_rmb();
+
+		/* FIXME: let the HW drop all erroneous packets */
+		ODP_ASSERT(status & RxRES);
+
+		/* FIXME: don't include FCS */
+		/* FIXME: use proper macro to mask packet length from status */
+		pkt_len = (status & 0x00003fff) - 4;
+
+		pkt = odp_packet_alloc(NULL /* pool */ , R8169_RX_BUF_SIZE);
+		ODP_ASSERT(pkt != ODP_PACKET_INVALID); /* TODO */
+		pkt_hdr = odp_packet_hdr(pkt);
+
+		pull_tail(pkt_hdr, R8169_RX_BUF_SIZE - pkt_len);
+
+		/* FIXME: check return value  */
+		odp_packet_copy_from_mem(pkt, 0, pkt_len,
+					 pkt_r8169->rx_data.vaddr +
+					 pkt_r8169->rx_next *
+					 R8169_RX_BUF_SIZE);
+
+		pkt_hdr->input = pktio_entry->s.handle;
+
+		pkt_r8169->rx_next++;
+		if (pkt_r8169->rx_next >= NUM_RX_DESC)
+			pkt_r8169->rx_next = 0;
+
+		pkt_table[rx_pkts] = pkt;
+		rx_pkts++;
+	}
+
+	r8169_rx_refill(pktio_entry, refill_from, rx_pkts);
+
+	return rx_pkts;
+}
+
+
 static pktio_ops_module_t r8169_pktio_ops = {
 	.base = {
 		 .name = "r8169",
@@ -316,6 +299,8 @@ static pktio_ops_module_t r8169_pktio_ops = {
 
 	.open = r8169_open,
 	.close = r8169_close,
+
+	.recv = r8169_recv,
 };
 
 /** r8169 module entry point */

@@ -134,8 +134,8 @@ typedef struct {
 	// tx_tail, tx_head ? (mmio + offset)
 } pktio_ops_e1000e_data_t;
 
-static void e1000e_prepare_rx(pktio_entry_t * pktio_entry,
-			      uint16_t from, uint16_t num);
+static void e1000e_rx_refill(pktio_entry_t * pktio_entry,
+			     uint16_t from, uint16_t num);
 
 static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 		       pktio_entry_t * pktio_entry,
@@ -170,9 +170,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	odp_ticketlock_init(&pkt_e1000e->rx_lock);
 	odp_ticketlock_init(&pkt_e1000e->tx_lock);
 
-	/* Intel e1000e needs head/tail descriptors untouched */
-	e1000e_prepare_rx(pktio_entry, 0,
-			  E1000E_RX_RING_SIZE_DEFAULT - 1);
+	e1000e_rx_refill(pktio_entry, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
 
 	/* FIXME iobase and container(probably) has to be done globally and not per driver */
 	iobase = iomem_init();
@@ -253,14 +251,17 @@ static int e1000e_close(pktio_entry_t *pktio_entry ODP_UNUSED)
 	return 0;
 }
 
-static void e1000e_prepare_rx(pktio_entry_t * pktio_entry,
-			      uint16_t from, uint16_t num)
+static void e1000e_rx_refill(pktio_entry_t * pktio_entry,
+			     uint16_t from, uint16_t num)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e =
 	    odp_ops_data(pktio_entry, e1000e);
 	uint16_t i = from;
 
-	while (num && num < E1000E_RX_RING_SIZE_DEFAULT) {
+	/* Need 1 desc gap to keep tail from touching head */
+	ODP_ASSERT(num < E1000E_RX_RING_SIZE_DEFAULT);
+
+	while (num) {
 		e1000e_rx_desc_t *rx_desc = &pkt_e1000e->rx_ring[i];
 		dma_addr_t dma_addr =
 		    pkt_e1000e->rx_data.iova + i * E1000E_RX_BUF_SIZE;
