@@ -57,7 +57,8 @@ static int mdev_get_names(const char *netdev, char *driver, size_t sz)
 /**
  * returns group_id or -1 on fail and fills group_uuid
  */
-int mdev_sysfs_discover(const char *netdev, char *uuid, size_t sz)
+int mdev_sysfs_discover(const char *netdev, const char *mod_name, char *uuid,
+			size_t sz)
 {
 	int ret;
 	char ifname[64];
@@ -87,7 +88,7 @@ int mdev_sysfs_discover(const char *netdev, char *uuid, size_t sz)
 		return -1;
 	}
 
-	if (strcmp(driver, R8169_MOD_NAME)) {
+	if (strcmp(driver, mod_name)) {
 		printf("Invalid driver name\n");
 		return -1;
 	}

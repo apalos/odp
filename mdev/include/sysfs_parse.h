@@ -4,6 +4,7 @@
 #define NET_MDEV_MATCH "mdev:"
 #define R8169_MOD_NAME "r8169"
 
-int mdev_sysfs_discover(const char *netdev, char *uuid, size_t sz);
+int mdev_sysfs_discover(const char *netdev, const char *modname, char *uuid,
+			size_t sz);
 
 #endif

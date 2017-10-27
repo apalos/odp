@@ -213,7 +213,8 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 
 	printf("r8169: probing %s\n", netdev);
 
-	group_id = mdev_sysfs_discover(netdev, group_uuid, sizeof(group_uuid));
+	group_id = mdev_sysfs_discover(netdev, R8169_MOD_NAME, group_uuid,
+				       sizeof(group_uuid));
 	if (group_id < 0)
 		return -EINVAL;
 
