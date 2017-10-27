@@ -155,14 +155,14 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	int group_id;
 
 	printf("e1000e: probing %s\n", netdev);
+	/* Init pktio entry */
+	memset(pkt_e1000e, 0, sizeof(*pkt_e1000e));
+	memset(group_uuid, 0, sizeof(group_uuid));
 
 	group_id = mdev_sysfs_discover(netdev, E1000E_MOD_NAME, group_uuid,
 				       sizeof(group_uuid));
 	if (group_id < 0)
 		return -EINVAL;
-
-	/* Init pktio entry */
-	memset(pkt_e1000e, 0, sizeof(*pkt_e1000e));
 
 	pkt_e1000e->capa.max_input_queues = 1;
 	pkt_e1000e->capa.max_output_queues = 1;
