@@ -10,6 +10,7 @@
 #include <odp_packet_io_internal.h>
 #include <odp/drv/byteorder.h>
 #include <odp/api/hints.h>
+#include <odp/drv/hints.h>
 
 #include <drivers/r8169.h>
 #include <drivers/driver_ops.h>
@@ -66,8 +67,8 @@ static inline void rtl8169_mark_as_last_descriptor(struct r8169_rxdesc *desc)
 	desc->opts1 |= odpdrv_cpu_to_le_32(RingEnd);
 }
 
-static int r8169_rx_fill(void *rx_data, struct iomem data, char *rx_buff[],
-			 volatile void *ioaddr)
+static int ODP_UNUSED r8169_rx_fill(void *rx_data, struct iomem data,
+				    char *rx_buff[], volatile void *ioaddr)
 {
 	unsigned int i;
 	struct r8169_rxdesc *r8169_rxring = (struct r8169_rxdesc *) rx_data;
@@ -84,7 +85,8 @@ static int r8169_rx_fill(void *rx_data, struct iomem data, char *rx_buff[],
 	return 0;
 }
 
-static void r8169_recv(void *rxring, char *rx_buff[] ODP_UNUSED, volatile void *ioaddr)
+static void ODP_UNUSED r8169_recv(void *rxring, char *rx_buff[]ODP_UNUSED,
+				  volatile void *ioaddr)
 {
 	unsigned int i = 0;
 	struct r8169_rxdesc *r8169_rxring = (struct r8169_rxdesc *)rxring;
@@ -141,7 +143,8 @@ static inline void rtl8169_map_to_asic_tx(struct r8169_txdesc *desc, dma_addr_t 
 	desc->addr = odpdrv_cpu_to_le_64(mapping);
 }
 
-static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
+static void ODP_UNUSED r8169_xmit(void *txring, struct iomem data,
+				  volatile void *ioaddr)
 {
 	const int idx = 0;
 	__u32 opts[2];
@@ -191,8 +194,8 @@ static void r8169_prepare_rx(pktio_entry_t * pktio_entry,
 	rtl8169_mark_as_last_descriptor(&r8169_rxring[NUM_RX_DESC - 1]);
 }
 
-static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
-		      const char *netdev ODP_UNUSED, odp_pool_t pool ODP_UNUSED)
+static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
+		      const char *netdev, odp_pool_t pool ODP_UNUSED)
 {
 	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
 	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
@@ -205,6 +208,8 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	size_t rx_len, tx_len, mmio_len;
 	struct iomem rx_data, tx_data;
 	char group_uuid[64]; /* 37 should be enough */
+
+	printf("r8169: probing %s\n", netdev);
 
 	/* Init pktio entry */
 	memset(pkt_r8169, 0, sizeof(*pkt_r8169));
@@ -290,26 +295,23 @@ out:
 	return -1;
 }
 
-static int r8169_close(pktio_entry_t *pktio_entry ODP_UNUSED)
+static int r8169_close(pktio_entry_t * pktio_entry ODP_UNUSED)
 {
 	return 0;
 }
 
-/* FIXME make this staic once we have loadbale module support */
-const struct driver_ops r8169_ops = {
-	.rx_fill = r8169_rx_fill,
-	.recv = r8169_recv,
-	.xmit = r8169_xmit,
-};
-
-static pktio_ops_module_t r8169_pktio_ops ODP_UNUSED = {
+static pktio_ops_module_t r8169_pktio_ops = {
 	.base = {
 		 .name = "r8169",
 		 },
 
 	.open = r8169_open,
 	.close = r8169_close,
-
-	//.recv = e1000e_recv,
-	//.send = e1000e_send,
 };
+
+/** r8169 module entry point */
+static void ODPDRV_CONSTRUCTOR r8169_module_init(void)
+{
+	odp_module_constructor(&r8169_pktio_ops);
+	odp_subsystem_register_module(pktio_ops, &r8169_pktio_ops);
+}

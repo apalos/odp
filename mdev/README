@@ -1,0 +1,1 @@
+ODP_SYSCONFIG_FILE=./mdev/odp.conf ./example/ddf_app/odp_ddf_app mdev:enp0s25

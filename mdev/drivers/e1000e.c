@@ -16,6 +16,7 @@
 
 #include <odp/drv/byteorder.h>
 #include <odp/api/hints.h>
+#include <odp/drv/hints.h>
 
 #include <odp/api/plat/packet_inlines.h>
 #include <odp/api/packet.h>
@@ -135,7 +136,7 @@ static void e1000e_prepare_rx(pktio_entry_t * pktio_entry,
 			      uint16_t from, uint16_t num);
 
 static int e1000e_open(odp_pktio_t id ODP_UNUSED,
-		       pktio_entry_t *pktio_entry,
+		       pktio_entry_t * pktio_entry,
 		       const char *netdev, odp_pool_t pool ODP_UNUSED)
 {
 	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
@@ -150,7 +151,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	struct iomem rx_data, tx_data;
 	char group_uuid[64]; /* 37 should be enough */
 
-	printf("e1000e: open %s\n", netdev);
+	printf("e1000e: probing %s\n", netdev);
 
 	/* Init pktio entry */
 	memset(pkt_e1000e, 0, sizeof(*pkt_e1000e));
@@ -232,6 +233,8 @@ out:
 		close(group);
 	if (container)
 		close(container);
+
+	return -1;
 }
 
 
@@ -401,7 +404,7 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	return tx_pkts;
 }
 
-static pktio_ops_module_t e1000e_pktio_ops ODP_UNUSED = {
+static pktio_ops_module_t e1000e_pktio_ops = {
 	.base = {
 		 .name = "e1000e",
 		 },
@@ -412,3 +415,10 @@ static pktio_ops_module_t e1000e_pktio_ops ODP_UNUSED = {
 	.recv = e1000e_recv,
 	.send = e1000e_send,
 };
+
+/** e1000e module entry point */
+static void ODPDRV_CONSTRUCTOR e1000e_module_init(void)
+{
+	odp_module_constructor(&e1000e_pktio_ops);
+	odp_subsystem_register_module(pktio_ops, &e1000e_pktio_ops);
+}
