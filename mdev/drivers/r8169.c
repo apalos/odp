@@ -17,6 +17,7 @@
 #include <mm_api.h>
 #include <reg_api.h>
 #include <vfio_api.h>
+#include <sysfs_parse.h>
 
 #include <uapi/net_mdev.h>
 
@@ -201,15 +202,20 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
 	struct vfio_device_info device_info = { .argsz = sizeof(device_info) };
 	int container = -1, group = -1, device = -1;
-	int ret;
+	int ret = -EINVAL;
 	void *iobase, *iocur;
 	pktio_ops_r8169_data_t *pkt_r8169 =
 	    odp_ops_data(pktio_entry, r8169);
 	size_t rx_len, tx_len, mmio_len;
 	struct iomem rx_data, tx_data;
 	char group_uuid[64]; /* 37 should be enough */
+	int group_id;
 
 	printf("r8169: probing %s\n", netdev);
+
+	group_id = mdev_sysfs_discover(netdev, group_uuid, sizeof(group_uuid));
+	if (group_id < 0)
+		return -EINVAL;
 
 	/* Init pktio entry */
 	memset(pkt_r8169, 0, sizeof(*pkt_r8169));
@@ -231,7 +237,7 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 		goto out;
 
 	/* FIXME Get group_id from name */
-	group = get_group(11);
+	group = get_group(group_id);
 	if (group < 0)
 		goto out;
 
