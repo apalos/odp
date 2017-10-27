@@ -89,7 +89,7 @@ static void r8169_recv(void *rxring, char *rx_buff[] ODP_UNUSED, volatile void *
 	unsigned int i = 0;
 	struct r8169_rxdesc *r8169_rxring = (struct r8169_rxdesc *)rxring;
 
-	if(!ioaddr)
+	if (!ioaddr)
 		return;
 
 	while (1) {
@@ -167,9 +167,32 @@ static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 
 	return;
 }
-static int r8169_open(odp_pktio_t id ODP_UNUSED,
-		       pktio_entry_t *pktio_entry,
-		       const char *netdev ODP_UNUSED, odp_pool_t pool ODP_UNUSED)
+
+static void r8169_prepare_rx(pktio_entry_t * pktio_entry,
+			     uint16_t from, uint16_t num)
+{
+	pktio_ops_r8169_data_t *pkt_r8169 =
+	    odp_ops_data(pktio_entry, r8169);
+	struct r8169_rxdesc *r8169_rxring;
+	uint16_t i = from;
+
+	while (num && num < NUM_RX_DESC) {
+		r8169_rxring = &pkt_r8169->rx_ring[i];
+		dma_addr_t dma_addr =
+		    pkt_r8169->rx_data.iova + i * R8169_RX_BUF_SIZE;
+		rtl8169_map_to_asic_rx(&r8169_rxring[i], dma_addr, R8169_RX_BUF_SIZE);
+
+		i++;
+		if (i == NUM_RX_DESC)
+			i = 0;
+		num--;
+	}
+
+	rtl8169_mark_as_last_descriptor(&r8169_rxring[NUM_RX_DESC - 1]);
+}
+
+static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
+		      const char *netdev ODP_UNUSED, odp_pool_t pool ODP_UNUSED)
 {
 	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
 	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
@@ -193,12 +216,11 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED,
 	odp_ticketlock_init(&pkt_r8169->rx_lock);
 	odp_ticketlock_init(&pkt_r8169->tx_lock);
 
+	/* FIXME iobase and container(probably) has to be done globally and not per driver */
 	iobase = iomem_init();
 	if (!iobase)
 		return -ENOMEM;
 	iocur = iobase;
-
-	/* Create a new container */
 	container = get_container();
 	if (container < 0)
 		goto out;
@@ -212,7 +234,7 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED,
 			       &device_info, group_uuid);
 
 	/* Init device and mmaps */
-	pkt_r8169->mmio = vfio_mmap_region(device, 0, &mmio_len);
+	pkt_r8169->mmio = vfio_mmap_region(device, 2, &mmio_len);
 	if (!pkt_r8169->mmio)
 		return -1; /* FIXME map return values to odp errors */
 
@@ -229,7 +251,13 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED,
 		goto out;
 	}
 
-	/* FIXME decide on allocated areas, instead of getting 2MB per direction */
+	/* TODO: we shall pass only 2 params to iomem_alloc_dma(): fd and iomem
+	 * requested size can be in iomem->size.
+	 * function will fill in vaddr and iova.
+	 */
+	/* FIXME decide on allocated areas per hardware instead of getting 2MB
+	 * per direction
+	 */
 	rx_data.size = 2 * 1024 * 1024;
 	ret = iomem_alloc_dma(device, &iocur, &rx_data);
 	if (ret)
@@ -240,18 +268,7 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED,
 	if (ret)
 		goto out;
 
-	//e1000e_rx_ring_refill(pktio_entry, 0,
-			      //E1000E_RX_RING_SIZE_DEFAULT - 1);
-
-
-	// TODO: do we need to pass len to vfio_mmap_region ?
-	// TODO: we shall pass only 2 params to iomem_alloc_dma():
-	// int fd
-	// struct iomem *iomem
-	// Requested size can be in iomem->size
-	// The function will fill in vaddr and iova.
-	// iomem_current is supposedly global, so why pass it here ?
-
+	r8169_prepare_rx(pktio_entry, 0, NUM_RX_DESC);
 	// call common code: transition complete
 
 	return 0;
@@ -273,15 +290,6 @@ out:
 	return -1;
 }
 
-static void *r8169_map_mmio(int device, size_t *len)
-{
-	void *mmio;
-
-	mmio = vfio_mmap_region(device, 2, len);
-
-	return mmio;
-}
-
 static int r8169_close(pktio_entry_t *pktio_entry ODP_UNUSED)
 {
 	return 0;
@@ -289,14 +297,9 @@ static int r8169_close(pktio_entry_t *pktio_entry ODP_UNUSED)
 
 /* FIXME make this staic once we have loadbale module support */
 const struct driver_ops r8169_ops = {
-	/* endianess for vendor/id? */
-	.vendor = 0x10ec,
-	.device = 0x8168,
-	.vfio_quirks = NULL,
 	.rx_fill = r8169_rx_fill,
 	.recv = r8169_recv,
 	.xmit = r8169_xmit,
-	.map_mmio = r8169_map_mmio,
 };
 
 static pktio_ops_module_t r8169_pktio_ops ODP_UNUSED = {

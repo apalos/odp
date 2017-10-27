@@ -10,6 +10,7 @@
 #define NUM_RX_DESC     256U    /* Number of Rx descriptor registers */
 #define R8169_TX_RING_BYTES     (NUM_TX_DESC * sizeof(struct r8169_txdesc))
 #define R8169_RX_RING_BYTES     (NUM_RX_DESC * sizeof(struct r8169_rxdesc))
+#define R8169_RX_BUF_SIZE 2048U
 
 /* drivers/ethernet/realtek/r8169.c */
 enum rtl_registers {

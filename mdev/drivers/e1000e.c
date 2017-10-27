@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <linux/types.h>
 
 #include <odp/drv/byteorder.h>
@@ -28,6 +29,7 @@
 #include <vfio_api.h>
 #include <reg_api.h>
 
+#include <uapi/net_mdev.h>
 /* Common code. TODO: relocate */
 #if 1
 #define dma_wmb()
@@ -111,7 +113,8 @@ typedef struct {
 	/* TODO: cache align everything when we have profiling information */
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
-	volatile uint8_t *mmio;		/**< BAR0 mmap */
+	/* volatile void *mmio; */
+	void *mmio;		/**< BAR0 mmap */
 
 	odp_bool_t lockless_rx;		/**< no locking for RX */
 	odp_ticketlock_t rx_lock;	/**< RX ring lock */
@@ -128,15 +131,24 @@ typedef struct {
 	// tx_tail, tx_head ? (mmio + offset)
 } pktio_ops_e1000e_data_t;
 
-static void e1000e_rx_ring_refill(pktio_entry_t * pktio_entry,
-				  uint16_t from, uint16_t num);
+static void e1000e_prepare_rx(pktio_entry_t * pktio_entry,
+			      uint16_t from, uint16_t num);
 
 static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 		       pktio_entry_t *pktio_entry,
 		       const char *netdev, odp_pool_t pool ODP_UNUSED)
 {
+	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
+	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
+	struct vfio_device_info device_info = { .argsz = sizeof(device_info) };
+	int container = -1, group = -1, device = -1;
+	int ret;
+	void *iobase, *iocur;
 	pktio_ops_e1000e_data_t *pkt_e1000e =
 	    odp_ops_data(pktio_entry, e1000e);
+	size_t rx_len, tx_len, mmio_len;
+	struct iomem rx_data, tx_data;
+	char group_uuid[64]; /* 37 should be enough */
 
 	printf("e1000e: open %s\n", netdev);
 
@@ -149,43 +161,93 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	odp_ticketlock_init(&pkt_e1000e->rx_lock);
 	odp_ticketlock_init(&pkt_e1000e->tx_lock);
 
-	// pkt_e1000e->mmio = vfio_mmap_region(device, 0, len);
+	/* Intel e1000e needs head/tail descriptors untouched */
+	e1000e_prepare_rx(pktio_entry, 0,
+			  E1000E_RX_RING_SIZE_DEFAULT - 1);
 
-	// pkt_e1000e->rx_ring = vfio_mmap_region();
-	// iomem_alloc_dma(fd, &pkt_e1000e->rx_data);
+	/* FIXME iobase and container(probably) has to be done globally and not per driver */
+	iobase = iomem_init();
+	if (!iobase)
+		return -ENOMEM;
+	iocur = iobase;
+	container = get_container();
+	if (container < 0)
+		goto out;
 
-	e1000e_rx_ring_refill(pktio_entry, 0,
-			      E1000E_RX_RING_SIZE_DEFAULT - 1);
+	/* FIXME Get group_id from name */
+	group = get_group(11);
+	if (group < 0)
+		goto out;
 
-	// pkt_e1000e->tx_ring = vfio_mmap_region();
-	// iomem_alloc_dma(fd, &pkt_e1000e->tx_data);
+	device = vfio_init_dev(group, container, &group_status, &iommu_info,
+			       &device_info, group_uuid);
 
-	// TODO: do we need to pass len to vfio_mmap_region ?
-	// TODO: we shall pass only 2 params to iomem_alloc_dma():
-	// int fd
-	// struct iomem *iomem
-	// Requested size can be in iomem->size
-	// The function will fill in vaddr and iova.
-	// iomem_current is supposedly global, so why pass it here ?
+	/* Init device and mmaps */
+	pkt_e1000e->mmio = vfio_mmap_region(device, 0, &mmio_len);
+	if (!pkt_e1000e->mmio)
+		return -1; /* FIXME map return values to odp errors */
 
+	pkt_e1000e->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
+					      VFIO_NET_MDEV_RX_REGION_INDEX, &rx_len);
+	if (!pkt_e1000e->rx_ring) {
+		printf("Cannot map RxRing\n");
+		goto out;
+	}
+	pkt_e1000e->tx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
+					      VFIO_NET_MDEV_TX_REGION_INDEX, &tx_len);
+	if (!pkt_e1000e->tx_ring) {
+		printf("Cannot map TxRing\n");
+		goto out;
+	}
+
+	/* TODO: we shall pass only 2 params to iomem_alloc_dma(): fd and iomem
+	 * requested size can be in iomem->size.
+	 * function will fill in vaddr and iova.
+	 */
+	/* FIXME decide on allocated areas per hardware instead of getting 2MB
+	 * per direction
+	 */
+	rx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(device, &iocur, &rx_data);
+	if (ret)
+		goto out;
+
+	tx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(device, &iocur, &tx_data);
+	if (ret)
+		goto out;
 	// call common code: transition complete
 
 	return 0;
+out:
+	if (iobase)
+		iomem_free(iobase);
+	if (pkt_e1000e->rx_ring)
+		munmap(pkt_e1000e->rx_ring, rx_len);
+	if (pkt_e1000e->tx_ring)
+		munmap(pkt_e1000e->tx_ring, tx_len);
+	if (pkt_e1000e->mmio)
+		munmap(pkt_e1000e->mmio, mmio_len);
+	if (group)
+		close(group);
+	if (container)
+		close(container);
 }
+
 
 static int e1000e_close(pktio_entry_t *pktio_entry ODP_UNUSED)
 {
 	return 0;
 }
 
-static void e1000e_rx_ring_refill(pktio_entry_t * pktio_entry,
-				  uint16_t from, uint16_t num)
+static void e1000e_prepare_rx(pktio_entry_t * pktio_entry,
+			      uint16_t from, uint16_t num)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e =
 	    odp_ops_data(pktio_entry, e1000e);
 	uint16_t i = from;
 
-	while (num) {
+	while (num && num < E1000E_RX_RING_SIZE_DEFAULT) {
 		e1000e_rx_desc_t *rx_desc = &pkt_e1000e->rx_ring[i];
 		dma_addr_t dma_addr =
 		    pkt_e1000e->rx_data.iova + i * E1000E_RX_BUF_SIZE;
@@ -203,7 +265,7 @@ static void e1000e_rx_ring_refill(pktio_entry_t * pktio_entry,
 	dma_wmb();
 
 	io_write32(odpdrv_cpu_to_le_32(i),
-		   pkt_e1000e->mmio + E1000_RDT_OFFSET);
+		   (char *)pkt_e1000e->mmio + E1000_RDT_OFFSET);
 }
 
 static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
@@ -285,7 +347,7 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	/* Determine how much space is available in TX ring */
 	budget =
 	    pkt_e1000e->tx_next + E1000E_TX_RING_SIZE_DEFAULT -
-	    io_read32(pkt_e1000e->mmio + E1000_TDH_OFFSET) - 1;
+	    io_read32((char *)pkt_e1000e->mmio + E1000_TDH_OFFSET) - 1;
 
 	if (budget > num)
 		budget = num;
@@ -324,7 +386,7 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	dma_wmb();
 
 	io_write32(odp_cpu_to_le_32(pkt_e1000e->tx_next),
-		   pkt_e1000e->mmio + E1000_TDT_OFFSET);
+		   (char *)pkt_e1000e->mmio + E1000_TDT_OFFSET);
 
 	if (!pkt_e1000e->lockless_tx)
 		odp_ticketlock_unlock(&pkt_e1000e->tx_lock);
