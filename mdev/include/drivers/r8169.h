@@ -2,13 +2,9 @@
 #define _R8169_H_
 #include <linux/types.h>
 #include <odp/drv/byteorder.h>
-//#define COMPILER_BARRIER() asm volatile("" ::: "memory")
-//#define MEMORY_BARRIER() asm volatile ("mfence" ::: "memory")
-//#define STORE_BARRIER() asm volatile ("sfence" ::: "memory")
-//#define LOAD_BARRIER() asm volatile ("lfence" ::: "memory")
+
 #define dma_wmb()
 #define dma_rmb()
-#define unlikely(x) (x)
 
 #define NUM_TX_DESC     64      /* Number of Tx descriptor registers */
 #define NUM_RX_DESC     256U    /* Number of Rx descriptor registers */

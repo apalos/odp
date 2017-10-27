@@ -32,7 +32,6 @@
 #if 1
 #define dma_wmb()
 #define dma_rmb()
-
 typedef unsigned long dma_addr_t;
 #endif
 

@@ -4,8 +4,10 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <linux/types.h>
 
+#include <odp_packet_io_internal.h>
 #include <odp/drv/byteorder.h>
 #include <odp/api/hints.h>
 
@@ -15,22 +17,32 @@
 #include <reg_api.h>
 #include <vfio_api.h>
 
+#include <uapi/net_mdev.h>
+
 typedef unsigned long dma_addr_t;
 
-/* test udp packet */
-char pkt_udp[] = {
-	0x02, 0x50, 0x43, 0xff, 0xff, 0x01, /* mac dst */
-	0x00, 0x60, 0xdd, 0x45, 0xe5, 0x67, /* mac src */
-	0x08, 0x00, 0x45, 0x00, 0x00, 0x32,
-	0x38, 0xb8, 0x40, 0x00, 0x40, 0x11,
-	0x1e, 0xae, 0xc0, 0xa8, 0x31, 0x03, /* ip src: 192.168.49.3 and dst 192.168.49.1 */
-	0xc0, 0xa8, 0x31, 0x01, 0xed, 0x19,
-	0x00, 0x35, 0x00, 0x1e, 0x8b, 0xf4,
-	0xc4, 0x2e, 0x01, 0x00, 0x00, 0x01,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x04, 0x74, 0x65, 0x73, 0x74, 0x00,
-	0x00, 0x01, 0x00, 0x01
-};
+/** Packet socket using mediated r8169 device */
+typedef struct {
+	/* TODO: cache align everything when we have profiling information */
+	odp_pktio_capability_t capa;	/**< interface capabilities */
+
+	/* volatile void *mmio; */
+	void *mmio;		/**< BAR2 mmap */
+
+	odp_bool_t lockless_rx;		/**< no locking for RX */
+	odp_ticketlock_t rx_lock;	/**< RX ring lock */
+	struct r8169_rxdesc *rx_ring;	/**< RX ring mmap */
+	struct iomem rx_data;		/**< RX packet payload mmap */
+	uint16_t rx_next;		/**< next entry in RX ring to use */
+	// rx_tail, rx_head ? (mmio + offset)
+
+	odp_bool_t lockless_tx;		/**< no locking for TX */
+	odp_ticketlock_t tx_lock;	/**< TX ring lock */
+	struct r8169_txdesc *tx_ring;	/**< TX ring mmap */
+	struct iomem tx_data;		/**< TX packet payload mmap */
+	uint16_t tx_next;		/**< next entry in TX ring to use */
+	// tx_tail, tx_head ? (mmio + offset)
+} pktio_ops_r8169_data_t;
 
 static inline void rtl8169_mark_to_asic(struct r8169_rxdesc *desc, __u32 rx_buf_sz)
 {
@@ -98,7 +110,7 @@ static void r8169_recv(void *rxring, char *rx_buff[] ODP_UNUSED, volatile void *
 			*/
 			dma_rmb();
 
-			if (unlikely(status & RxRES)) {
+			if (odp_unlikely(status & RxRES)) {
 				printf("Rx ERROR. status = %08x\n",status);
 				if ((status & (RxRUNT | RxCRC)) &&
 					!(status & (RxRWT | RxFOVF))
@@ -136,10 +148,9 @@ static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 	__u32 status, len;
 	int entry = 0;
 	struct r8169_txdesc *r8169_txring = (struct r8169_txdesc *)txring;
-	char *tx_buff = (char *)(data.vaddr + idx * 2048);
+	char *tx_buff ODP_UNUSED = (char *)(data.vaddr + idx * 2048);
 
 	/* XXX FIXME need proper packet size and sizeof(src) *NOT* dst */
-	memcpy(tx_buff, pkt_udp, sizeof(pkt_udp));
 	rtl8169_map_to_asic_tx(&r8169_txring[idx], data.iova + idx * 2048);
 	/* FIXME no fragmentation support */
 	opts[0] = DescOwn;
@@ -147,7 +158,7 @@ static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 	/* FIXME No vlan support */
 	opts[1] = odpdrv_cpu_to_le_32(0x00);
 	/* FIXME get actual packet size */
-	len = sizeof(pkt_udp);
+	len = 64;
 
 	status = opts[0] | len | (RingEnd * !((entry + 1) % NUM_TX_DESC));
 	r8169_txring->opts1 = odpdrv_cpu_to_le_32(status);
@@ -155,6 +166,109 @@ static void r8169_xmit(void *txring, struct iomem data, volatile void *ioaddr)
 	io_write8(NPQ, (volatile char *)ioaddr + TxPoll);
 
 	return;
+}
+static int r8169_open(odp_pktio_t id ODP_UNUSED,
+		       pktio_entry_t *pktio_entry,
+		       const char *netdev ODP_UNUSED, odp_pool_t pool ODP_UNUSED)
+{
+	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
+	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
+	struct vfio_device_info device_info = { .argsz = sizeof(device_info) };
+	int container = -1, group = -1, device = -1;
+	int ret;
+	void *iobase, *iocur;
+	pktio_ops_r8169_data_t *pkt_r8169 =
+	    odp_ops_data(pktio_entry, r8169);
+	size_t rx_len, tx_len, mmio_len;
+	struct iomem rx_data, tx_data;
+	char group_uuid[64]; /* 37 should be enough */
+
+	/* Init pktio entry */
+	memset(pkt_r8169, 0, sizeof(*pkt_r8169));
+	memset(group_uuid, 0, sizeof(group_uuid));
+
+	pkt_r8169->capa.max_input_queues = 1;
+	pkt_r8169->capa.max_output_queues = 1;
+
+	odp_ticketlock_init(&pkt_r8169->rx_lock);
+	odp_ticketlock_init(&pkt_r8169->tx_lock);
+
+	iobase = iomem_init();
+	if (!iobase)
+		return -ENOMEM;
+	iocur = iobase;
+
+	/* Create a new container */
+	container = get_container();
+	if (container < 0)
+		goto out;
+
+	/* FIXME Get group_id from name */
+	group = get_group(11);
+	if (group < 0)
+		goto out;
+
+	device = vfio_init_dev(group, container, &group_status, &iommu_info,
+			       &device_info, group_uuid);
+
+	/* Init device and mmaps */
+	pkt_r8169->mmio = vfio_mmap_region(device, 0, &mmio_len);
+	if (!pkt_r8169->mmio)
+		return -1; /* FIXME map return values to odp errors */
+
+	pkt_r8169->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
+					      VFIO_NET_MDEV_RX_REGION_INDEX, &rx_len);
+	if (!pkt_r8169->rx_ring) {
+		printf("Cannot map RxRing\n");
+		goto out;
+	}
+	pkt_r8169->tx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
+					      VFIO_NET_MDEV_TX_REGION_INDEX, &tx_len);
+	if (!pkt_r8169->tx_ring) {
+		printf("Cannot map TxRing\n");
+		goto out;
+	}
+
+	/* FIXME decide on allocated areas, instead of getting 2MB per direction */
+	ret = iomem_alloc_dma(device, 2 * 1024 * 1024, &iocur, &rx_data);
+	if (ret)
+		goto out;
+
+	ret = iomem_alloc_dma(device, 2 * 1024 * 1024, &iocur, &tx_data);
+	if (ret)
+		goto out;
+
+	//e1000e_rx_ring_refill(pktio_entry, 0,
+			      //E1000E_RX_RING_SIZE_DEFAULT - 1);
+
+
+	// TODO: do we need to pass len to vfio_mmap_region ?
+	// TODO: we shall pass only 2 params to iomem_alloc_dma():
+	// int fd
+	// struct iomem *iomem
+	// Requested size can be in iomem->size
+	// The function will fill in vaddr and iova.
+	// iomem_current is supposedly global, so why pass it here ?
+
+	// call common code: transition complete
+
+	return 0;
+
+out:
+	if (iobase)
+		iomem_free(iobase);
+	if (pkt_r8169->rx_ring)
+		munmap(pkt_r8169->rx_ring, rx_len);
+	if (pkt_r8169->tx_ring)
+		munmap(pkt_r8169->tx_ring, tx_len);
+	if (pkt_r8169->mmio)
+		munmap(pkt_r8169->mmio, mmio_len);
+	if (group)
+		close(group);
+	if (container)
+		close(container);
+
+	return -1;
 }
 
 static void *r8169_map_mmio(int device, size_t *len)
@@ -164,6 +278,11 @@ static void *r8169_map_mmio(int device, size_t *len)
 	mmio = vfio_mmap_region(device, 2, len);
 
 	return mmio;
+}
+
+static int r8169_close(pktio_entry_t *pktio_entry ODP_UNUSED)
+{
+	return 0;
 }
 
 /* FIXME make this staic once we have loadbale module support */
@@ -176,4 +295,16 @@ const struct driver_ops r8169_ops = {
 	.recv = r8169_recv,
 	.xmit = r8169_xmit,
 	.map_mmio = r8169_map_mmio,
+};
+
+static pktio_ops_module_t r8169_pktio_ops ODP_UNUSED = {
+	.base = {
+		 .name = "r8169",
+		 },
+
+	.open = r8169_open,
+	.close = r8169_close,
+
+	//.recv = e1000e_recv,
+	//.send = e1000e_send,
 };
