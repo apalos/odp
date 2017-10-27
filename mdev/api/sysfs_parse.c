@@ -96,6 +96,8 @@ int mdev_sysfs_discover(const char *netdev, const char *mod_name, char *uuid,
 	snprintf(sysfs_path, sizeof(sysfs_path), "/sys/class/net/%s/device/mdev_supported_types/%s-netmdev/devices/",
 		 ifname, driver);
 	dir = opendir(sysfs_path);
+	if (!dir)
+		return -1;
 	/* FIXME only the last uuid will be returned now */
 	while ((dp = readdir(dir))) {
 		if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, ".."))

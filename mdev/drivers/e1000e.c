@@ -147,8 +147,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	int container = -1, group = -1, device = -1;
 	int ret;
 	void *iobase, *iocur;
-	pktio_ops_e1000e_data_t *pkt_e1000e =
-	    odp_ops_data(pktio_entry, e1000e);
+	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
 	size_t rx_len, tx_len, mmio_len;
 	struct iomem rx_data, tx_data;
 	char group_uuid[64]; /* 37 should be enough */
@@ -182,7 +181,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 		goto out;
 
 	/* FIXME Get group_id from name */
-	group = get_group(11);
+	group = get_group(group_id);
 	if (group < 0)
 		goto out;
 
@@ -193,8 +192,10 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	/* Init device and mmaps */
 	pkt_e1000e->mmio = vfio_mmap_region(device, 0, &mmio_len);
-	if (!pkt_e1000e->mmio)
-		return -1; /* FIXME map return values to odp errors */
+	if (!pkt_e1000e->mmio) {
+		printf("Cannot map MMIO\n");
+		goto out;
+	}
 
 	pkt_e1000e->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_RX_REGION_INDEX, &rx_len);
@@ -414,7 +415,7 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 static pktio_ops_module_t e1000e_pktio_ops = {
 	.base = {
 		 .name = "e1000e",
-		 },
+	},
 
 	.open = e1000e_open,
 	.close = e1000e_close,

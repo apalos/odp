@@ -145,7 +145,8 @@ static struct vfio_info_cap_header *vfio_get_region_info_cap(struct vfio_region_
 	if (!(info->flags & VFIO_REGION_INFO_FLAG_CAPS))
 		return NULL;
 
-	for (hdr = (struct vfio_info_cap_header *)(char *)ptr + info->cap_offset; hdr != ptr; hdr = (struct vfio_info_cap_header *)(char *)ptr + hdr->next) {
+	for (hdr = (struct vfio_info_cap_header *)((char *)ptr + info->cap_offset);
+	     hdr != ptr; hdr = ((struct vfio_info_cap_header *)(char *)ptr + hdr->next)) {
 		if (hdr->id == id)
 			return hdr;
 	}

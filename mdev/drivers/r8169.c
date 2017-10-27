@@ -95,8 +95,7 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 	int container = -1, group = -1, device = -1;
 	int ret = -EINVAL;
 	void *iobase, *iocur;
-	pktio_ops_r8169_data_t *pkt_r8169 =
-	    odp_ops_data(pktio_entry, r8169);
+	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 	size_t rx_len, tx_len, mmio_len;
 	struct iomem rx_data, tx_data;
 	char group_uuid[64]; /* 37 should be enough */
@@ -138,10 +137,11 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 	if (device < 0)
 		goto out;
 
-	/* Init device and mmaps */
 	pkt_r8169->mmio = vfio_mmap_region(device, 2, &mmio_len);
-	if (!pkt_r8169->mmio)
-		return -1; /* FIXME map return values to odp errors */
+	if (!pkt_r8169->mmio) {
+		printf("Cannot map MMIO\n");
+		goto out;
+	}
 
 	pkt_r8169->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_RX_REGION_INDEX, &rx_len);
@@ -295,7 +295,7 @@ static int r8169_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 static pktio_ops_module_t r8169_pktio_ops = {
 	.base = {
 		 .name = "r8169",
-		 },
+	},
 
 	.open = r8169_open,
 	.close = r8169_close,
