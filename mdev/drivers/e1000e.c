@@ -274,8 +274,7 @@ static void e1000e_prepare_rx(pktio_entry_t * pktio_entry,
 static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		       odp_packet_t pkt_table[], int num)
 {
-	pktio_ops_e1000e_data_t *pkt_e1000e =
-	    odp_ops_data(pktio_entry, e1000e);
+	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
 	uint16_t budget;
 	int rx_pkts = 0;
 
@@ -285,9 +284,8 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	if (budget > num)
 		budget = num;
 
-	budget =
-	    packet_alloc_multi(NULL /* pool */ , E1000E_RX_BUF_SIZE,
-			       pkt_table, budget);
+	budget = odp_packet_alloc_multi(NULL /* pool */ , E1000E_RX_BUF_SIZE,
+					pkt_table, budget);
 
 	while (rx_pkts < budget) {
 		volatile e1000e_rx_desc_t *rx_desc =
@@ -298,12 +296,10 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		uint32_t status;
 
 		/* TODO: let the HW drop all erroneous packets */
-		status =
-		    odpdrv_le_to_cpu_32(rx_desc->wb.upper.status_error);
+		status = odpdrv_le_to_cpu_32(rx_desc->wb.upper.status_error);
 		if (odp_unlikely(status & E1000E_RX_DESC_STAT_ERR_MASK)) {
 			pkt_e1000e->rx_next++;
-			if (pkt_e1000e->rx_next >=
-			    E1000E_RX_RING_SIZE_DEFAULT)
+			if (pkt_e1000e->rx_next >= E1000E_RX_RING_SIZE_DEFAULT)
 				pkt_e1000e->rx_next = 0;
 			odp_packet_free_multi(&pkt_table[rx_pkts],
 					      budget - rx_pkts);
@@ -395,7 +391,7 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		odp_ticketlock_unlock(&pkt_e1000e->tx_lock);
 
 	if (odp_unlikely(tx_pkts == 0)) {
-		if (__odp_errno != 0)
+		if (odp_errno() != 0)
 			return -1;
 	} else {
 		odp_packet_free_multi(pkt_table, tx_pkts);

@@ -1,1 +1,1 @@
-ODP_SYSCONFIG_FILE=./mdev/odp.conf ./example/ddf_app/odp_ddf_app mdev:enp0s25
+ODP_SYSCONFIG_FILE=./mdev/odp.conf LD_LIBRARY_PATH=./lib/.libs/ ./example/generator/odp_generator -I mdev:enp0s25 -mr
