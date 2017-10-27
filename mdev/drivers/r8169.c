@@ -230,11 +230,13 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED,
 	}
 
 	/* FIXME decide on allocated areas, instead of getting 2MB per direction */
-	ret = iomem_alloc_dma(device, 2 * 1024 * 1024, &iocur, &rx_data);
+	rx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(device, &iocur, &rx_data);
 	if (ret)
 		goto out;
 
-	ret = iomem_alloc_dma(device, 2 * 1024 * 1024, &iocur, &tx_data);
+	tx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(device, &iocur, &tx_data);
 	if (ret)
 		goto out;
 

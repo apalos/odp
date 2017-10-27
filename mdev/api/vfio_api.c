@@ -285,31 +285,30 @@ void *vfio_mmap_region(int device, __u32 region, size_t *len)
 /**
  * allocate portion of the 4GB space reserved by iomem_init()
  */
-int iomem_alloc_dma(int device, unsigned int size, void **iomem_current,
+int iomem_alloc_dma(int device, void **iomem_current,
 		    struct iomem *iomem)
 {
 	void *tmp;
 	int ret;
 	struct vfio_iommu_type1_dma_map dma_map;
 
-	if (size >= 32 * 1024 * 1024)
+	if (iomem->size >= 32 * 1024 * 1024)
 		return -EINVAL;
-	if ((size & 0xFFF) != 0)
+	if ((iomem->size & 0xFFF) != 0)
 		return -EINVAL; /* size should be a 4K aligned quantity */
 
 	memset(&dma_map, 0, sizeof(dma_map));
 	dma_map.argsz = sizeof(dma_map);
 	/* get a portion of the 4GB window created at init time */
-	tmp = mmap(*iomem_current, size, PROT_READ | PROT_WRITE,
+	tmp = mmap(*iomem_current, iomem->size, PROT_READ | PROT_WRITE,
 		   MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1,
 		   0);
 	if (tmp == MAP_FAILED)
 		return -ENOMEM;
 
-	*iomem_current = (char *)*iomem_current + size;
+	*iomem_current = (char *)*iomem_current + iomem->size;
 
 	iomem->vaddr = tmp;
-	iomem->size = size;
 
 	dma_map.vaddr = (__u64)iomem->vaddr;
 	dma_map.size = iomem->size;
@@ -321,8 +320,8 @@ int iomem_alloc_dma(int device, unsigned int size, void **iomem_current,
 		return -ENOMEM;
 	iomem->iova = dma_map.iova;
 
-	printf("iomem_alloc: VA(%p) -> physmem(%dKB) <- IOVA(%llx)\n",
-	       iomem->vaddr, size/1024, iomem->iova);
+	printf("iomem_alloc: VA(%p) -> physmem(%lluKB) <- IOVA(%llx)\n",
+	       iomem->vaddr, iomem->size / 1024, iomem->iova);
 
 	return 0;
 }
