@@ -27,8 +27,9 @@
 
 #include <drivers/driver_ops.h>
 #include <mm_api.h>
-#include <vfio_api.h>
 #include <reg_api.h>
+#include <vfio_api.h>
+#include <sysfs_parse.h>
 
 #include <uapi/net_mdev.h>
 /* Common code. TODO: relocate */
@@ -42,6 +43,7 @@ typedef unsigned long dma_addr_t;
 #define E1000E_TX_RING_SIZE_DEFAULT 256
 #define E1000E_TX_RING_SIZE_MIN 64
 #define E1000E_TX_RING_SIZE_MAX 4096
+#define E1000E_MOD_NAME "e1000e"
 
 #define E1000_TDH_OFFSET 0x03810UL
 #define E1000_TDT_OFFSET 0x03818UL
@@ -150,8 +152,14 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	size_t rx_len, tx_len, mmio_len;
 	struct iomem rx_data, tx_data;
 	char group_uuid[64]; /* 37 should be enough */
+	int group_id;
 
 	printf("e1000e: probing %s\n", netdev);
+
+	group_id = mdev_sysfs_discover(netdev, E1000E_MOD_NAME, group_uuid,
+				       sizeof(group_uuid));
+	if (group_id < 0)
+		return -EINVAL;
 
 	/* Init pktio entry */
 	memset(pkt_e1000e, 0, sizeof(*pkt_e1000e));
@@ -182,6 +190,8 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	device = vfio_init_dev(group, container, &group_status, &iommu_info,
 			       &device_info, group_uuid);
+	if (device < 0)
+		goto out;
 
 	/* Init device and mmaps */
 	pkt_e1000e->mmio = vfio_mmap_region(device, 0, &mmio_len);

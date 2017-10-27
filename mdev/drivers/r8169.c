@@ -244,6 +244,8 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 
 	device = vfio_init_dev(group, container, &group_status, &iommu_info,
 			       &device_info, group_uuid);
+	if (device < 0)
+		goto out;
 
 	/* Init device and mmaps */
 	pkt_r8169->mmio = vfio_mmap_region(device, 2, &mmio_len);

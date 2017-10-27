@@ -354,7 +354,6 @@ int vfio_init_dev(int grp, int container, struct vfio_group_status *grp_status,
 	ret = ioctl(grp, VFIO_GROUP_SET_CONTAINER, &container);
 	if (ret < 0) {
 		vfio_print_fail(VFIO_GROUP_SET_CONTAINER);
-		printf("Failed to set group container\n");
 		goto out;
 	}
 
