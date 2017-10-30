@@ -67,23 +67,16 @@ static pktio_ops_module_t r8169_pktio_ops;
 static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 			    uint16_t from, uint16_t num);
 
-#if 0
-static void ODP_UNUSED r8169_xmit(void *txring, struct iomem data,
-				  volatile void *ioaddr)
-#endif
-
 static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		      const odp_packet_t pkt_table[] ODP_UNUSED, int num)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 	int tx_pkts = 0;
-	int budget;
 
 	if (!pkt_r8169->lockless_tx)
 		odp_ticketlock_lock(&pkt_r8169->tx_lock);
-	budget = num;
 
-	while (budget) {
+	while (tx_pkts < num) {
 		volatile struct r8169_txdesc *tx_desc =
 			&pkt_r8169->tx_ring[pkt_r8169->tx_next];
 		uint32_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
@@ -108,19 +101,18 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		opts[0] = DescOwn;
 		opts[0] |= FirstFrag | LastFrag;
 		/* FIXME No vlan support */
-		opts[1] = odpdrv_cpu_to_le_32(0x00);
+		opts[1] = 0;
+
+		pkt_r8169->tx_next++;
+		if (odp_unlikely(pkt_r8169->tx_next) >= NUM_TX_DESC)
+			pkt_r8169->tx_next = 0;
 
 		status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->tx_next));
 
 		tx_desc->opts1 = odpdrv_cpu_to_le_32(status);
 		tx_desc->opts2 = opts[1];
 
-		pkt_r8169->tx_next++;
-		if (odp_unlikely(pkt_r8169->tx_next) >= NUM_TX_DESC)
-			pkt_r8169->tx_next = 0;
-
 		tx_pkts++;
-		budget--;
 	}
 
 	dma_wmb();
