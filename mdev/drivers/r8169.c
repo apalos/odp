@@ -1,4 +1,5 @@
 #include <odp_posix_extensions.h>
+
 #include <stdio.h>
 #include <endian.h>
 #include <unistd.h>
@@ -7,10 +8,13 @@
 #include <sys/mman.h>
 #include <linux/types.h>
 
-#include <odp_packet_io_internal.h>
 #include <odp/drv/byteorder.h>
 #include <odp/api/hints.h>
 #include <odp/drv/hints.h>
+#include <odp/api/plat/packet_inlines.h>
+#include <odp/api/packet.h>
+
+#include <odp_packet_io_internal.h>
 
 #include <drivers/r8169.h>
 #include <drivers/driver_ops.h>
@@ -64,40 +68,77 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 			    uint16_t from, uint16_t num);
 
 #if 0
-static inline void rtl8169_map_to_asic_tx(struct r8169_txdesc *desc, dma_addr_t mapping)
-
-{
-	desc->addr = odpdrv_cpu_to_le_64(mapping);
-}
-
 static void ODP_UNUSED r8169_xmit(void *txring, struct iomem data,
 				  volatile void *ioaddr)
-{
-	const int idx = 0;
-	__u32 opts[2];
-	__u32 status, len;
-	int entry = 0;
-	struct r8169_txdesc *r8169_txring = (struct r8169_txdesc *)txring;
-	char *tx_buff ODP_UNUSED = (char *)(data.vaddr + idx * 2048);
-
-	/* XXX FIXME need proper packet size and sizeof(src) *NOT* dst */
-	rtl8169_map_to_asic_tx(&r8169_txring[idx], data.iova + idx * 2048);
-	/* FIXME no fragmentation support */
-	opts[0] = DescOwn;
-	opts[0] |= FirstFrag | LastFrag;
-	/* FIXME No vlan support */
-	opts[1] = odpdrv_cpu_to_le_32(0x00);
-	/* FIXME get actual packet size */
-	len = 64;
-
-	status = opts[0] | len | (RingEnd * !((entry + 1) % NUM_TX_DESC));
-	r8169_txring->opts1 = odpdrv_cpu_to_le_32(status);
-	r8169_txring->opts2 = odpdrv_cpu_to_le_32(opts[1]);
-	io_write8(NPQ, (volatile char *)ioaddr + TxPoll);
-
-	return;
-}
 #endif
+
+static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
+		      const odp_packet_t pkt_table[] ODP_UNUSED, int num)
+{
+	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
+	int tx_pkts = 0;
+	int budget;
+
+	if (!pkt_r8169->lockless_tx)
+		odp_ticketlock_lock(&pkt_r8169->tx_lock);
+	budget = num;
+
+	while (budget) {
+		volatile struct r8169_txdesc *tx_desc =
+			&pkt_r8169->tx_ring[pkt_r8169->tx_next];
+		uint32_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
+		uint32_t offset = pkt_r8169->tx_next * R8169_TX_BUF_SIZE;
+		uint32_t opts[2];
+		uint32_t status;
+
+		status = odpdrv_le_to_cpu_32(tx_desc->opts1);
+		if (status & DescOwn)
+			break;
+		/* Skip oversized packets silently */
+		if (pkt_len > R8169_TX_BUF_SIZE) {
+			tx_pkts++;
+			continue;
+		}
+
+		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
+				       pkt_r8169->tx_data.vaddr + offset);
+
+		tx_desc->addr = odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova + offset);
+		/* FIXME no fragmentation support */
+		opts[0] = DescOwn;
+		opts[0] |= FirstFrag | LastFrag;
+		/* FIXME No vlan support */
+		opts[1] = odpdrv_cpu_to_le_32(0x00);
+
+		status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->tx_next));
+
+		tx_desc->opts1 = odpdrv_cpu_to_le_32(status);
+		tx_desc->opts2 = odpdrv_cpu_to_le_32(opts[1]);
+
+		pkt_r8169->tx_next++;
+		if (odp_unlikely(pkt_r8169->tx_next) >= NUM_TX_DESC)
+			pkt_r8169->tx_next = 0;
+
+		tx_pkts++;
+		budget--;
+	}
+
+	dma_wmb();
+
+	io_write8(NPQ, (char *)pkt_r8169->mmio + TxPoll);
+
+	if (!pkt_r8169->lockless_tx)
+		odp_ticketlock_unlock(&pkt_r8169->tx_lock);
+
+	if (odp_unlikely(tx_pkts == 0)) {
+		if (odp_errno() != 0)
+			return -1;
+	} else {
+		odp_packet_free_multi(pkt_table, tx_pkts);
+	}
+
+	return tx_pkts;
+}
 
 static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 		      const char *netdev, odp_pool_t pool)
@@ -340,6 +381,7 @@ static pktio_ops_module_t r8169_pktio_ops = {
 	.close = r8169_close,
 
 	.recv = r8169_recv,
+	.send = r8169_send,
 };
 
 /** r8169 module entry point */

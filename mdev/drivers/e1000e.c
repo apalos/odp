@@ -428,7 +428,7 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		tx_desc->upper.data = odp_cpu_to_le_32(0);
 
 		pkt_e1000e->tx_next++;
-		if (pkt_e1000e->tx_next >= E1000E_RX_RING_SIZE_DEFAULT)
+		if (odp_unlikely(pkt_e1000e->tx_next) >= E1000E_RX_RING_SIZE_DEFAULT)
 			pkt_e1000e->tx_next = 0;
 
 		tx_pkts++;
