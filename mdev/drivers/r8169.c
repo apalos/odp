@@ -60,7 +60,7 @@ typedef struct {
 
 static pktio_ops_module_t r8169_pktio_ops;
 
-static void r8169_rx_refill(pktio_entry_t *pktio_entry,
+static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 			    uint16_t from, uint16_t num);
 
 #if 0
@@ -193,7 +193,7 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 	if (ret)
 		goto out;
 
-	r8169_rx_refill(pktio_entry, 0, NUM_RX_DESC);
+	r8169_rx_refill(pkt_r8169, 0, NUM_RX_DESC);
 
 	ret = vfio_start_device(device);
 	if (ret < 0)
@@ -242,11 +242,9 @@ static int r8169_close(pktio_entry_t * pktio_entry)
 	return 0;
 }
 
-/* TODO: pass pkt_r8169 */
-static void r8169_rx_refill(pktio_entry_t *pktio_entry,
+static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 			    uint16_t from, uint16_t num)
 {
-	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 	uint16_t i = from;
 
 	ODP_ASSERT(num <= NUM_RX_DESC);
@@ -327,7 +325,7 @@ static int r8169_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		rx_pkts++;
 	}
 
-	r8169_rx_refill(pktio_entry, refill_from, rx_pkts);
+	r8169_rx_refill(pkt_r8169, refill_from, rx_pkts);
 
 	return rx_pkts;
 }

@@ -146,7 +146,7 @@ typedef struct {
 
 static pktio_ops_module_t e1000e_pktio_ops;
 
-static void e1000e_rx_refill(pktio_entry_t * pktio_entry,
+static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 			     uint16_t from, uint16_t num);
 
 static int e1000e_open(odp_pktio_t id ODP_UNUSED,
@@ -243,7 +243,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	if (ret)
 		goto out;
 
-	e1000e_rx_refill(pktio_entry, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
+	e1000e_rx_refill(pkt_e1000e, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
 
 	ret = vfio_start_device(device);
 	if (ret < 0)
@@ -293,11 +293,9 @@ static int e1000e_close(pktio_entry_t *pktio_entry)
 	return 0;
 }
 
-static void e1000e_rx_refill(pktio_entry_t * pktio_entry,
+static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 			     uint16_t from, uint16_t num)
 {
-	pktio_ops_e1000e_data_t *pkt_e1000e =
-	    odp_ops_data(pktio_entry, e1000e);
 	uint16_t i = from;
 
 	/* Need 1 desc gap to keep tail from touching head */
