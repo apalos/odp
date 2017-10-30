@@ -311,6 +311,7 @@ static int r8169_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 	uint16_t refill_from;
 	int rx_pkts = 0;
+	int ret;
 
 	/* Keep track of the start point to refill RX ring */
 	refill_from = pkt_r8169->rx_next;
@@ -337,16 +338,21 @@ static int r8169_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		pkt_len = (status & 0x00003fff) - 4;
 
 		pkt = odp_packet_alloc(pkt_r8169->pool, R8169_RX_BUF_SIZE);
-		ODP_ASSERT(pkt != ODP_PACKET_INVALID); /* TODO */
+		if (odp_unlikely(pkt == ODP_PACKET_INVALID))
+			break;
+
 		pkt_hdr = odp_packet_hdr(pkt);
 
 		pull_tail(pkt_hdr, R8169_RX_BUF_SIZE - pkt_len);
 
-		/* FIXME: check return value  */
-		odp_packet_copy_from_mem(pkt, 0, pkt_len,
-					 pkt_r8169->rx_data.vaddr +
-					 pkt_r8169->rx_next *
-					 R8169_RX_BUF_SIZE);
+		ret = odp_packet_copy_from_mem(pkt, 0, pkt_len,
+					       pkt_r8169->rx_data.vaddr +
+					       pkt_r8169->rx_next *
+					       R8169_RX_BUF_SIZE);
+		if (odp_unlikely(ret != 0)) {
+			odp_packet_free(pkt);
+			break;
+		}
 
 		pkt_hdr->input = pktio_entry->s.handle;
 
