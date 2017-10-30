@@ -115,7 +115,7 @@ typedef union {
 /** Packet socket using mediated e1000e device */
 typedef struct {
 	/* TODO: cache align everything when we have profiling information */
-	odp_pktio_capability_t capa;	/**< interface capabilities */
+	odp_pool_t pool;		/**< pool to alloc packets from */
 
 	/* volatile void *mmio; */
 	void *mmio;			/**< BAR0 mmap */
@@ -136,6 +136,8 @@ typedef struct {
 	uint16_t tx_next;		/**< next entry in TX ring to use */
 	// tx_tail, tx_head ? (mmio + offset)
 
+	odp_pktio_capability_t capa;	/**< interface capabilities */
+
 	int device;			/**< VFIO device */
 	int group;			/**< VFIO group */
 
@@ -149,7 +151,7 @@ static void e1000e_rx_refill(pktio_entry_t * pktio_entry,
 
 static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 		       pktio_entry_t * pktio_entry,
-		       const char *netdev, odp_pool_t pool ODP_UNUSED)
+		       const char *netdev, odp_pool_t pool)
 {
 	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
 	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
@@ -165,6 +167,11 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	/* Init pktio entry */
 	memset(pkt_e1000e, 0, sizeof(*pkt_e1000e));
 	memset(group_uuid, 0, sizeof(group_uuid));
+
+	if (pool == ODP_POOL_INVALID)
+		return -EINVAL;
+
+	pkt_e1000e->pool = pool;
 
 	group_id = mdev_sysfs_discover(netdev, E1000E_MOD_NAME, group_uuid,
 				       sizeof(group_uuid));
@@ -329,7 +336,7 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	if (budget > num)
 		budget = num;
 
-	budget = odp_packet_alloc_multi(NULL /* pool */ , E1000E_RX_BUF_SIZE,
+	budget = odp_packet_alloc_multi(pkt_e1000e->pool, E1000E_RX_BUF_SIZE,
 					pkt_table, budget);
 
 	while (rx_pkts < budget) {

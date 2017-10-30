@@ -29,7 +29,7 @@ typedef unsigned long dma_addr_t;
 /** Packet socket using mediated r8169 device */
 typedef struct {
 	/* TODO: cache align everything when we have profiling information */
-	odp_pktio_capability_t capa;	/**< interface capabilities */
+	odp_pool_t pool;		/**< pool to alloc packets from */
 
 	/* volatile void *mmio; */
 	void *mmio;		/**< BAR2 mmap */
@@ -47,6 +47,8 @@ typedef struct {
 	struct r8169_txdesc *tx_ring;	/**< TX ring mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
 	uint16_t tx_next;		/**< next entry in TX ring to use */
+
+	odp_pktio_capability_t capa;	/**< interface capabilities */
 
 	int device;			/**< VFIO device */
 	int group;			/**< VFIO group */
@@ -96,7 +98,7 @@ static void ODP_UNUSED r8169_xmit(void *txring, struct iomem data,
 #endif
 
 static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
-		      const char *netdev, odp_pool_t pool ODP_UNUSED)
+		      const char *netdev, odp_pool_t pool)
 {
 	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
 	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
@@ -113,6 +115,11 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 	/* Init pktio entry */
 	memset(pkt_r8169, 0, sizeof(*pkt_r8169));
 	memset(group_uuid, 0, sizeof(group_uuid));
+
+	if (pool == ODP_POOL_INVALID)
+		return -EINVAL;
+
+	pkt_r8169->pool = pool;
 
 	group_id = mdev_sysfs_discover(netdev, R8169_MOD_NAME, group_uuid,
 				       sizeof(group_uuid));
@@ -295,7 +302,7 @@ static int r8169_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		/* FIXME: use proper macro to mask packet length from status */
 		pkt_len = (status & 0x00003fff) - 4;
 
-		pkt = odp_packet_alloc(NULL /* pool */ , R8169_RX_BUF_SIZE);
+		pkt = odp_packet_alloc(pkt_r8169->pool, R8169_RX_BUF_SIZE);
 		ODP_ASSERT(pkt != ODP_PACKET_INVALID); /* TODO */
 		pkt_hdr = odp_packet_hdr(pkt);
 
