@@ -132,6 +132,11 @@ typedef struct {
 	struct iomem tx_data;		/**< TX packet payload mmap */
 	uint16_t tx_next;		/**< next entry in TX ring to use */
 	// tx_tail, tx_head ? (mmio + offset)
+	int device;			/**< VFIO device */
+	int group;			/**< VFIO group */
+	size_t mmio_len;		/**< MMIO mmap'ed region length */
+	size_t rx_len;			/**< Rx mmap'ed region length */
+	size_t tx_len;			/**< Tx mmap'ed region length */
 } pktio_ops_e1000e_data_t;
 
 static void e1000e_rx_refill(pktio_entry_t * pktio_entry,
@@ -148,8 +153,6 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	int ret;
 	void *iobase, *iocur;
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
-	size_t rx_len, tx_len, mmio_len;
-	struct iomem rx_data, tx_data;
 	char group_uuid[64]; /* 37 should be enough */
 	int group_id;
 
@@ -168,8 +171,6 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	odp_ticketlock_init(&pkt_e1000e->rx_lock);
 	odp_ticketlock_init(&pkt_e1000e->tx_lock);
-
-	e1000e_rx_refill(pktio_entry, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
 
 	/* FIXME iobase and container(probably) has to be done globally and not per driver */
 	iobase = iomem_init();
@@ -191,20 +192,22 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 		goto out;
 
 	/* Init device and mmaps */
-	pkt_e1000e->mmio = vfio_mmap_region(device, 0, &mmio_len);
+	pkt_e1000e->mmio = vfio_mmap_region(device, 0, &pkt_e1000e->mmio_len);
 	if (!pkt_e1000e->mmio) {
 		printf("Cannot map MMIO\n");
 		goto out;
 	}
 
 	pkt_e1000e->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
-					      VFIO_NET_MDEV_RX_REGION_INDEX, &rx_len);
+					      VFIO_NET_MDEV_RX_REGION_INDEX,
+					      &pkt_e1000e->rx_len);
 	if (!pkt_e1000e->rx_ring) {
 		printf("Cannot map RxRing\n");
 		goto out;
 	}
 	pkt_e1000e->tx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
-					      VFIO_NET_MDEV_TX_REGION_INDEX, &tx_len);
+					      VFIO_NET_MDEV_TX_REGION_INDEX,
+					      &pkt_e1000e->tx_len);
 	if (!pkt_e1000e->tx_ring) {
 		printf("Cannot map TxRing\n");
 		goto out;
@@ -217,15 +220,17 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	/* FIXME decide on allocated areas per hardware instead of getting 2MB
 	 * per direction
 	 */
-	rx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(device, &iocur, &rx_data);
+	pkt_e1000e->rx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(device, &iocur, &pkt_e1000e->rx_data);
 	if (ret)
 		goto out;
 
-	tx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(device, &iocur, &tx_data);
+	pkt_e1000e->tx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(device, &iocur, &pkt_e1000e->tx_data);
 	if (ret)
 		goto out;
+
+	e1000e_rx_refill(pktio_entry, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
 
 	ret = vfio_start_device(device);
 	if (ret < 0)
@@ -233,25 +238,45 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	return 0;
 out:
+	if (pkt_e1000e->tx_data.vaddr)
+		iomem_free_dma(device, &pkt_e1000e->tx_data);
+	if (pkt_e1000e->rx_data.vaddr)
+		iomem_free_dma(device, &pkt_e1000e->rx_data);
+	if (pkt_e1000e->tx_ring)
+		munmap(pkt_e1000e->tx_ring, pkt_e1000e->tx_len);
+	if (pkt_e1000e->rx_ring)
+		munmap(pkt_e1000e->rx_ring, pkt_e1000e->rx_len);
+	if (pkt_e1000e->mmio)
+		munmap(pkt_e1000e->mmio, pkt_e1000e->mmio_len);
+	if (group > 0)
+		close(group);
+	if (container > 0)
+		close(container);
 	if (iobase)
 		iomem_free(iobase);
-	if (pkt_e1000e->rx_ring)
-		munmap(pkt_e1000e->rx_ring, rx_len);
-	if (pkt_e1000e->tx_ring)
-		munmap(pkt_e1000e->tx_ring, tx_len);
-	if (pkt_e1000e->mmio)
-		munmap(pkt_e1000e->mmio, mmio_len);
-	if (group)
-		close(group);
-	if (container)
-		close(container);
+
 
 	return -1;
 }
 
 
-static int e1000e_close(pktio_entry_t *pktio_entry ODP_UNUSED)
+static int e1000e_close(pktio_entry_t *pktio_entry)
 {
+	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
+
+	if (pkt_e1000e->tx_data.vaddr)
+		iomem_free_dma(pkt_e1000e->device, &pkt_e1000e->tx_data);
+	if (pkt_e1000e->rx_data.vaddr)
+		iomem_free_dma(pkt_e1000e->device, &pkt_e1000e->rx_data);
+	if (pkt_e1000e->tx_ring)
+		munmap(pkt_e1000e->tx_ring, pkt_e1000e->tx_len);
+	if (pkt_e1000e->rx_ring)
+		munmap(pkt_e1000e->rx_ring, pkt_e1000e->rx_len);
+	if (pkt_e1000e->mmio)
+		munmap(pkt_e1000e->mmio, pkt_e1000e->mmio_len);
+	if (pkt_e1000e->group > 0)
+		close(pkt_e1000e->group);
+
 	return 0;
 }
 

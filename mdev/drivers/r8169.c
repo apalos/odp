@@ -45,6 +45,11 @@ typedef struct {
 	struct r8169_txdesc *tx_ring;	/**< TX ring mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
 	uint16_t tx_next;		/**< next entry in TX ring to use */
+	int device;			/**< VFIO device */
+	int group;			/**< VFIO group */
+	size_t mmio_len;		/**< MMIO mmap'ed region length */
+	size_t rx_len;			/**< Rx mmap'ed region length */
+	size_t tx_len;			/**< Tx mmap'ed region length */
 } pktio_ops_r8169_data_t;
 
 static void r8169_rx_refill(pktio_entry_t *pktio_entry,
@@ -96,8 +101,6 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 	int ret = -EINVAL;
 	void *iobase, *iocur;
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
-	size_t rx_len, tx_len, mmio_len;
-	struct iomem rx_data, tx_data;
 	char group_uuid[64]; /* 37 should be enough */
 	int group_id;
 
@@ -136,21 +139,24 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 			       &device_info, group_uuid);
 	if (device < 0)
 		goto out;
+	pkt_r8169->device = device;
 
-	pkt_r8169->mmio = vfio_mmap_region(device, 2, &mmio_len);
+	pkt_r8169->mmio = vfio_mmap_region(device, 2, &pkt_r8169->mmio_len);
 	if (!pkt_r8169->mmio) {
 		printf("Cannot map MMIO\n");
 		goto out;
 	}
 
 	pkt_r8169->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
-					      VFIO_NET_MDEV_RX_REGION_INDEX, &rx_len);
+					      VFIO_NET_MDEV_RX_REGION_INDEX,
+					      &pkt_r8169->rx_len);
 	if (!pkt_r8169->rx_ring) {
 		printf("Cannot map RxRing\n");
 		goto out;
 	}
 	pkt_r8169->tx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
-					      VFIO_NET_MDEV_TX_REGION_INDEX, &tx_len);
+					      VFIO_NET_MDEV_TX_REGION_INDEX,
+					      &pkt_r8169->tx_len);
 	if (!pkt_r8169->tx_ring) {
 		printf("Cannot map TxRing\n");
 		goto out;
@@ -163,13 +169,13 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 	/* FIXME decide on allocated areas per hardware instead of getting 2MB
 	 * per direction
 	 */
-	rx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(device, &iocur, &rx_data);
+	pkt_r8169->rx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(device, &iocur, &pkt_r8169->rx_data);
 	if (ret)
 		goto out;
 
-	tx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(device, &iocur, &tx_data);
+	pkt_r8169->tx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(device, &iocur, &pkt_r8169->tx_data);
 	if (ret)
 		goto out;
 
@@ -181,24 +187,44 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 
 	return 0;
 out:
+	if (pkt_r8169->tx_data.vaddr)
+		iomem_free_dma(device, &pkt_r8169->tx_data);
+	if (pkt_r8169->rx_data.vaddr)
+		iomem_free_dma(device, &pkt_r8169->rx_data);
+	if (pkt_r8169->tx_ring)
+		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_len);
+	if (pkt_r8169->rx_ring)
+		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_len);
+	if (pkt_r8169->mmio)
+		munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
+	if (group > 0)
+		close(group);
+	if (container > 0)
+		close(container);
 	if (iobase)
 		iomem_free(iobase);
-	if (pkt_r8169->rx_ring)
-		munmap(pkt_r8169->rx_ring, rx_len);
-	if (pkt_r8169->tx_ring)
-		munmap(pkt_r8169->tx_ring, tx_len);
-	if (pkt_r8169->mmio)
-		munmap(pkt_r8169->mmio, mmio_len);
-	if (group)
-		close(group);
-	if (container)
-		close(container);
 
 	return -1;
 }
 
-static int r8169_close(pktio_entry_t * pktio_entry ODP_UNUSED)
+/* FIXME decide on iobase and container and free accordingly */
+static int r8169_close(pktio_entry_t * pktio_entry)
 {
+	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
+
+	if (pkt_r8169->tx_data.vaddr)
+		iomem_free_dma(pkt_r8169->device, &pkt_r8169->tx_data);
+	if (pkt_r8169->rx_data.vaddr)
+		iomem_free_dma(pkt_r8169->device, &pkt_r8169->rx_data);
+	if (pkt_r8169->tx_ring)
+		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_len);
+	if (pkt_r8169->rx_ring)
+		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_len);
+	if (pkt_r8169->mmio)
+		munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
+	if (pkt_r8169->group > 0)
+		close(pkt_r8169->group);
+
 	return 0;
 }
 

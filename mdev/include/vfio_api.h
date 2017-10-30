@@ -13,6 +13,7 @@ int vfio_init_dev(int grp, int container, struct vfio_group_status *grp_status,
 int vfio_get_region(int device, struct vfio_region_info *reg_info, __u32 region);
 void *vfio_mmap_region(int device, __u32 region, size_t *len);
 int iomem_alloc_dma(int device, void **iomem_curent, struct iomem *iomem);
+int iomem_free_dma(int device, struct iomem *iomem);
 int vfio_start_device(int device);
 
 #endif

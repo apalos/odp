@@ -327,6 +327,32 @@ int iomem_alloc_dma(int device, void **iomem_current,
 	return 0;
 }
 
+int iomem_free_dma(int device, struct iomem *iomem)
+{
+	struct vfio_iommu_type1_dma_unmap dma_unmap;
+	int ret;
+
+	memset(&dma_unmap, 0, sizeof(dma_unmap));
+	dma_unmap.argsz = sizeof(dma_unmap);
+	dma_unmap.iova = iomem->iova;
+	dma_unmap.size = iomem->size;
+	dma_unmap.flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE;
+
+	ret = ioctl(device, VFIO_IOMMU_UNMAP_DMA, &dma_unmap);
+	if (ret < 0) {
+		printf("iomem_free: unmap failed\n");
+		return -EFAULT;
+	}
+
+	ret = munmap(iomem->vaddr, iomem->size);
+	if (!ret) {
+		printf("munmap failed\n");
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
 int vfio_start_device(int device)
 {
 	return ioctl(device, VFIO_DEVICE_RESET, NULL);
