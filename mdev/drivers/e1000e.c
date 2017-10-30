@@ -39,11 +39,12 @@
 typedef unsigned long dma_addr_t;
 #endif
 
+#define E1000E_MOD_NAME "e1000e"
+
 /* TX ring definitions */
 #define E1000E_TX_RING_SIZE_DEFAULT 256
 #define E1000E_TX_RING_SIZE_MIN 64
 #define E1000E_TX_RING_SIZE_MAX 4096
-#define E1000E_MOD_NAME "e1000e"
 
 #define E1000_TDH_OFFSET 0x03810UL
 #define E1000_TDT_OFFSET 0x03818UL
@@ -117,8 +118,9 @@ typedef struct {
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
 	/* volatile void *mmio; */
-	void *mmio;		/**< BAR0 mmap */
+	void *mmio;			/**< BAR0 mmap */
 
+	/* RX ring hot data */
 	odp_bool_t lockless_rx;		/**< no locking for RX */
 	odp_ticketlock_t rx_lock;	/**< RX ring lock */
 	e1000e_rx_desc_t *rx_ring;	/**< RX ring mmap */
@@ -126,17 +128,20 @@ typedef struct {
 	uint16_t rx_next;		/**< next entry in RX ring to use */
 	// rx_tail, rx_head ? (mmio + offset)
 
+	/* TX ring hot data */
 	odp_bool_t lockless_tx;		/**< no locking for TX */
 	odp_ticketlock_t tx_lock;	/**< TX ring lock */
 	e1000e_tx_desc_t *tx_ring;	/**< TX ring mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
 	uint16_t tx_next;		/**< next entry in TX ring to use */
 	// tx_tail, tx_head ? (mmio + offset)
+
 	int device;			/**< VFIO device */
 	int group;			/**< VFIO group */
+
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
-	size_t rx_len;			/**< Rx mmap'ed region length */
-	size_t tx_len;			/**< Tx mmap'ed region length */
+	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
+	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
 } pktio_ops_e1000e_data_t;
 
 static void e1000e_rx_refill(pktio_entry_t * pktio_entry,
@@ -200,14 +205,14 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	pkt_e1000e->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_RX_REGION_INDEX,
-					      &pkt_e1000e->rx_len);
+					      &pkt_e1000e->rx_ring_len);
 	if (!pkt_e1000e->rx_ring) {
 		printf("Cannot map RxRing\n");
 		goto out;
 	}
 	pkt_e1000e->tx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_TX_REGION_INDEX,
-					      &pkt_e1000e->tx_len);
+					      &pkt_e1000e->tx_ring_len);
 	if (!pkt_e1000e->tx_ring) {
 		printf("Cannot map TxRing\n");
 		goto out;
@@ -243,9 +248,9 @@ out:
 	if (pkt_e1000e->rx_data.vaddr)
 		iomem_free_dma(device, &pkt_e1000e->rx_data);
 	if (pkt_e1000e->tx_ring)
-		munmap(pkt_e1000e->tx_ring, pkt_e1000e->tx_len);
+		munmap(pkt_e1000e->tx_ring, pkt_e1000e->tx_ring_len);
 	if (pkt_e1000e->rx_ring)
-		munmap(pkt_e1000e->rx_ring, pkt_e1000e->rx_len);
+		munmap(pkt_e1000e->rx_ring, pkt_e1000e->rx_ring_len);
 	if (pkt_e1000e->mmio)
 		munmap(pkt_e1000e->mmio, pkt_e1000e->mmio_len);
 	if (group > 0)
@@ -269,9 +274,9 @@ static int e1000e_close(pktio_entry_t *pktio_entry)
 	if (pkt_e1000e->rx_data.vaddr)
 		iomem_free_dma(pkt_e1000e->device, &pkt_e1000e->rx_data);
 	if (pkt_e1000e->tx_ring)
-		munmap(pkt_e1000e->tx_ring, pkt_e1000e->tx_len);
+		munmap(pkt_e1000e->tx_ring, pkt_e1000e->tx_ring_len);
 	if (pkt_e1000e->rx_ring)
-		munmap(pkt_e1000e->rx_ring, pkt_e1000e->rx_len);
+		munmap(pkt_e1000e->rx_ring, pkt_e1000e->rx_ring_len);
 	if (pkt_e1000e->mmio)
 		munmap(pkt_e1000e->mmio, pkt_e1000e->mmio_len);
 	if (pkt_e1000e->group > 0)

@@ -34,22 +34,26 @@ typedef struct {
 	/* volatile void *mmio; */
 	void *mmio;		/**< BAR2 mmap */
 
+	/* RX ring hot data */
 	odp_bool_t lockless_rx;		/**< no locking for RX */
 	odp_ticketlock_t rx_lock;	/**< RX ring lock */
 	struct r8169_rxdesc *rx_ring;	/**< RX ring mmap */
 	struct iomem rx_data;		/**< RX packet payload mmap */
 	uint16_t rx_next;		/**< next entry in RX ring to use */
 
+	/* TX ring hot data */
 	odp_bool_t lockless_tx;		/**< no locking for TX */
 	odp_ticketlock_t tx_lock;	/**< TX ring lock */
 	struct r8169_txdesc *tx_ring;	/**< TX ring mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
 	uint16_t tx_next;		/**< next entry in TX ring to use */
+
 	int device;			/**< VFIO device */
 	int group;			/**< VFIO group */
+
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
-	size_t rx_len;			/**< Rx mmap'ed region length */
-	size_t tx_len;			/**< Tx mmap'ed region length */
+	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
+	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
 } pktio_ops_r8169_data_t;
 
 static void r8169_rx_refill(pktio_entry_t *pktio_entry,
@@ -149,14 +153,14 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 
 	pkt_r8169->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_RX_REGION_INDEX,
-					      &pkt_r8169->rx_len);
+					      &pkt_r8169->rx_ring_len);
 	if (!pkt_r8169->rx_ring) {
 		printf("Cannot map RxRing\n");
 		goto out;
 	}
 	pkt_r8169->tx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_TX_REGION_INDEX,
-					      &pkt_r8169->tx_len);
+					      &pkt_r8169->tx_ring_len);
 	if (!pkt_r8169->tx_ring) {
 		printf("Cannot map TxRing\n");
 		goto out;
@@ -192,9 +196,9 @@ out:
 	if (pkt_r8169->rx_data.vaddr)
 		iomem_free_dma(device, &pkt_r8169->rx_data);
 	if (pkt_r8169->tx_ring)
-		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_len);
+		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_ring_len);
 	if (pkt_r8169->rx_ring)
-		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_len);
+		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_ring_len);
 	if (pkt_r8169->mmio)
 		munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
 	if (group > 0)
@@ -217,9 +221,9 @@ static int r8169_close(pktio_entry_t * pktio_entry)
 	if (pkt_r8169->rx_data.vaddr)
 		iomem_free_dma(pkt_r8169->device, &pkt_r8169->rx_data);
 	if (pkt_r8169->tx_ring)
-		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_len);
+		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_ring_len);
 	if (pkt_r8169->rx_ring)
-		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_len);
+		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_ring_len);
 	if (pkt_r8169->mmio)
 		munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
 	if (pkt_r8169->group > 0)
