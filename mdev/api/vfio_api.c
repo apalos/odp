@@ -345,7 +345,7 @@ int iomem_free_dma(int device, struct iomem *iomem)
 	}
 
 	ret = munmap(iomem->vaddr, iomem->size);
-	if (!ret) {
+	if (ret) {
 		printf("munmap failed\n");
 		return -EFAULT;
 	}
