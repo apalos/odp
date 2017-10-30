@@ -327,6 +327,11 @@ int iomem_alloc_dma(int device, void **iomem_current,
 	return 0;
 }
 
+int vfio_start_device(int device)
+{
+	return ioctl(device, VFIO_DEVICE_RESET, NULL);
+}
+
 /**
  * Initialize VFIO variables.
  * set IOMMU and get device regions

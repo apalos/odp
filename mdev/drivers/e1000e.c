@@ -226,7 +226,10 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	ret = iomem_alloc_dma(device, &iocur, &tx_data);
 	if (ret)
 		goto out;
-	// call common code: transition complete
+
+	ret = vfio_start_device(device);
+	if (ret < 0)
+		goto out;
 
 	return 0;
 out:
