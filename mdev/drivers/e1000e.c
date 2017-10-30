@@ -39,8 +39,6 @@
 typedef unsigned long dma_addr_t;
 #endif
 
-#define E1000E_MOD_NAME "e1000e"
-
 /* TX ring definitions */
 #define E1000E_TX_RING_SIZE_DEFAULT 256
 #define E1000E_TX_RING_SIZE_MIN 64
@@ -146,6 +144,8 @@ typedef struct {
 	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
 } pktio_ops_e1000e_data_t;
 
+static pktio_ops_module_t e1000e_pktio_ops;
+
 static void e1000e_rx_refill(pktio_entry_t * pktio_entry,
 			     uint16_t from, uint16_t num);
 
@@ -173,8 +173,9 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	pkt_e1000e->pool = pool;
 
-	group_id = mdev_sysfs_discover(netdev, E1000E_MOD_NAME, group_uuid,
-				       sizeof(group_uuid));
+	group_id =
+	    mdev_sysfs_discover(netdev, e1000e_pktio_ops.base.name, group_uuid,
+				sizeof(group_uuid));
 	if (group_id < 0)
 		return -EINVAL;
 

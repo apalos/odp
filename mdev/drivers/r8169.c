@@ -58,6 +58,8 @@ typedef struct {
 	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
 } pktio_ops_r8169_data_t;
 
+static pktio_ops_module_t r8169_pktio_ops;
+
 static void r8169_rx_refill(pktio_entry_t *pktio_entry,
 			    uint16_t from, uint16_t num);
 
@@ -121,8 +123,9 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 
 	pkt_r8169->pool = pool;
 
-	group_id = mdev_sysfs_discover(netdev, R8169_MOD_NAME, group_uuid,
-				       sizeof(group_uuid));
+	group_id =
+	    mdev_sysfs_discover(netdev, r8169_pktio_ops.base.name, group_uuid,
+				sizeof(group_uuid));
 	if (group_id < 0)
 		return -EINVAL;
 
