@@ -301,7 +301,7 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 	uint16_t i = from;
 
 	/* Need 1 desc gap to keep tail from touching head */
-	ODP_ASSERT(num < E1000E_RX_RING_SIZE_DEFAULT);
+	// TODO: ODP_ASSERT(num < E1000E_RX_RING_SIZE_DEFAULT);
 
 	while (num) {
 		e1000e_rx_desc_t *rx_desc = &pkt_e1000e->rx_ring[i];
