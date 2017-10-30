@@ -110,7 +110,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->tx_next));
 
 		tx_desc->opts1 = odpdrv_cpu_to_le_32(status);
-		tx_desc->opts2 = opts[1];
+		tx_desc->opts2 = odpdrv_cpu_to_le_32(opts[1]);
 
 		tx_pkts++;
 	}
