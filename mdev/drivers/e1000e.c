@@ -164,6 +164,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	int group_id;
 
 	printf("e1000e: probing %s\n", netdev);
+
 	/* Init pktio entry */
 	memset(pkt_e1000e, 0, sizeof(*pkt_e1000e));
 	memset(group_uuid, 0, sizeof(group_uuid));
@@ -194,15 +195,16 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	if (container < 0)
 		goto out;
 
-	/* FIXME Get group_id from name */
 	group = get_group(group_id);
 	if (group < 0)
 		goto out;
+	pkt_e1000e->group = group;
 
 	device = vfio_init_dev(group, container, &group_status, &iommu_info,
 			       &device_info, group_uuid);
 	if (device < 0)
 		goto out;
+	pkt_e1000e->device = device;
 
 	/* Init device and mmaps */
 	pkt_e1000e->mmio = vfio_mmap_region(device, 0, &pkt_e1000e->mmio_len);

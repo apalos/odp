@@ -144,10 +144,10 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 	if (container < 0)
 		goto out;
 
-	/* FIXME Get group_id from name */
 	group = get_group(group_id);
 	if (group < 0)
 		goto out;
+	pkt_r8169->group = group;
 
 	device = vfio_init_dev(group, container, &group_status, &iommu_info,
 			       &device_info, group_uuid);
