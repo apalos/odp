@@ -328,11 +328,20 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		       odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
-	uint16_t budget;
+	uint16_t refill_from;
+	uint16_t budget = 0;
 	int rx_pkts = 0;
 
-	/* Determine how many outstanding RX packets are there */
-	budget = 0;		// (RDT - RDH) modulo RX_RING_SIZE
+	/* Keep track of the start point to refill RX ring */
+	refill_from = pkt_e1000e->rx_next;
+
+	/*
+	 * Determine how many packets are available in RX ring:
+	 *     (Write_index - Read_index) modulo RX_ring_size
+	 */
+	budget += io_read32((char *)pkt_e1000e->mmio + E1000_RDH_OFFSET);
+	budget -= pkt_e1000e->rx_next;
+	budget &= E1000E_RX_RING_SIZE_DEFAULT - 1;
 
 	if (budget > num)
 		budget = num;
@@ -380,7 +389,7 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		rx_pkts++;
 	}
 
-	// e1000e_rx_ring_refill
+	e1000e_rx_refill(pkt_e1000e, refill_from, rx_pkts);
 
 	return rx_pkts;
 }
@@ -388,18 +397,21 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		       const odp_packet_t pkt_table[], int num)
 {
-	pktio_ops_e1000e_data_t *pkt_e1000e =
-	    odp_ops_data(pktio_entry, e1000e);
+	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
+	uint16_t budget = 0;
 	int tx_pkts = 0;
-	int budget;
 
 	if (!pkt_e1000e->lockless_tx)
 		odp_ticketlock_lock(&pkt_e1000e->tx_lock);
 
-	/* Determine how much space is available in TX ring */
-	budget =
-	    pkt_e1000e->tx_next + E1000E_TX_RING_SIZE_DEFAULT -
-	    io_read32((char *)pkt_e1000e->mmio + E1000_TDH_OFFSET) - 1;
+	/*
+	 * Determine how many packets will fit in TX ring:
+	 *     (TX_ring_size + Write_index - Read_index - 1) modulo TX_ring_size
+	 */
+	budget = E1000E_TX_RING_SIZE_DEFAULT - 1;
+	budget -= pkt_e1000e->tx_next;
+	budget += io_read32((char *)pkt_e1000e->mmio + E1000_TDH_OFFSET);
+	budget &= E1000E_TX_RING_SIZE_DEFAULT - 1;
 
 	if (budget > num)
 		budget = num;
