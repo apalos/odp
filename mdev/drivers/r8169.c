@@ -228,10 +228,6 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 
 	r8169_rx_refill(pkt_r8169, 0, NUM_RX_DESC);
 
-	ret = vfio_start_device(device);
-	if (ret < 0)
-		goto out;
-
 	return 0;
 out:
 	if (group > 0)

@@ -353,11 +353,6 @@ int iomem_free_dma(int device, struct iomem *iomem)
 	return 0;
 }
 
-int vfio_start_device(int device)
-{
-	return ioctl(device, VFIO_DEVICE_RESET, NULL);
-}
-
 /**
  * Initialize VFIO variables.
  * set IOMMU and get device regions

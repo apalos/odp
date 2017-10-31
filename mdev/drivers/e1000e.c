@@ -247,10 +247,6 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	e1000e_rx_refill(pkt_e1000e, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
 
-	ret = vfio_start_device(device);
-	if (ret < 0)
-		goto out;
-
 	return 0;
 out:
 	if (group > 0)
