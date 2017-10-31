@@ -258,7 +258,6 @@ out:
 static int r8169_close(pktio_entry_t * pktio_entry)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
-	int ret;
 
 	if (pkt_r8169->group > 0)
 		close(pkt_r8169->group);
@@ -269,9 +268,9 @@ static int r8169_close(pktio_entry_t * pktio_entry)
 	if (pkt_r8169->tx_ring)
 		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_ring_len);
 	if (pkt_r8169->rx_ring)
-		ret = munmap(pkt_r8169->rx_ring, pkt_r8169->rx_ring_len);
+		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_ring_len);
 	if (pkt_r8169->mmio)
-		ret = munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
+		munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
 
 	return 0;
 }
