@@ -253,6 +253,8 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	return 0;
 out:
+	if (group > 0)
+		close(group);
 	if (pkt_e1000e->tx_data.vaddr)
 		iomem_free_dma(device, &pkt_e1000e->tx_data);
 	if (pkt_e1000e->rx_data.vaddr)
@@ -263,13 +265,10 @@ out:
 		munmap(pkt_e1000e->rx_ring, pkt_e1000e->rx_ring_len);
 	if (pkt_e1000e->mmio)
 		munmap(pkt_e1000e->mmio, pkt_e1000e->mmio_len);
-	if (group > 0)
-		close(group);
 	if (container > 0)
 		close(container);
 	if (iobase)
 		iomem_free(iobase);
-
 
 	return -1;
 }
@@ -279,6 +278,8 @@ static int e1000e_close(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
 
+	if (pkt_e1000e->group > 0)
+		close(pkt_e1000e->group);
 	if (pkt_e1000e->tx_data.vaddr)
 		iomem_free_dma(pkt_e1000e->device, &pkt_e1000e->tx_data);
 	if (pkt_e1000e->rx_data.vaddr)
@@ -289,8 +290,6 @@ static int e1000e_close(pktio_entry_t *pktio_entry)
 		munmap(pkt_e1000e->rx_ring, pkt_e1000e->rx_ring_len);
 	if (pkt_e1000e->mmio)
 		munmap(pkt_e1000e->mmio, pkt_e1000e->mmio_len);
-	if (pkt_e1000e->group > 0)
-		close(pkt_e1000e->group);
 
 	return 0;
 }

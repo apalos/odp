@@ -234,6 +234,8 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 
 	return 0;
 out:
+	if (group > 0)
+		close(group);
 	if (pkt_r8169->tx_data.vaddr)
 		iomem_free_dma(device, &pkt_r8169->tx_data);
 	if (pkt_r8169->rx_data.vaddr)
@@ -244,8 +246,6 @@ out:
 		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_ring_len);
 	if (pkt_r8169->mmio)
 		munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
-	if (group > 0)
-		close(group);
 	if (container > 0)
 		close(container);
 	if (iobase)
@@ -258,7 +258,10 @@ out:
 static int r8169_close(pktio_entry_t * pktio_entry)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
+	int ret;
 
+	if (pkt_r8169->group > 0)
+		close(pkt_r8169->group);
 	if (pkt_r8169->tx_data.vaddr)
 		iomem_free_dma(pkt_r8169->device, &pkt_r8169->tx_data);
 	if (pkt_r8169->rx_data.vaddr)
@@ -266,11 +269,9 @@ static int r8169_close(pktio_entry_t * pktio_entry)
 	if (pkt_r8169->tx_ring)
 		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_ring_len);
 	if (pkt_r8169->rx_ring)
-		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_ring_len);
+		ret = munmap(pkt_r8169->rx_ring, pkt_r8169->rx_ring_len);
 	if (pkt_r8169->mmio)
-		munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
-	if (pkt_r8169->group > 0)
-		close(pkt_r8169->group);
+		ret = munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
 
 	return 0;
 }
