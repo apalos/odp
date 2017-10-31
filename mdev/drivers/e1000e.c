@@ -247,6 +247,10 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	e1000e_rx_refill(pkt_e1000e, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
 
+	printf("%s: starting initial wait\n", __func__);
+	usleep(20 * 1000 * 1000);
+	printf("%s: initial wait is complete\n", __func__);
+
 	return 0;
 out:
 	if (group > 0)
@@ -393,19 +397,18 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		       const odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
-	uint16_t budget = 0;
 	int tx_pkts = 0;
+	uint16_t budget;
 
 	if (!pkt_e1000e->lockless_tx)
 		odp_ticketlock_lock(&pkt_e1000e->tx_lock);
 
-	/*
-	 * Determine how many packets will fit in TX ring:
-	 *     (TX_ring_size + Write_index - Read_index - 1) modulo TX_ring_size
-	 */
+	/* Determine how many packets will fit in TX ring */
 	budget = E1000E_TX_RING_SIZE_DEFAULT - 1;
 	budget -= pkt_e1000e->tx_next;
-	budget += io_read32((char *)pkt_e1000e->mmio + E1000_TDH_OFFSET);
+	budget +=
+	    odp_le_to_cpu_32(io_read32
+			     ((char *)pkt_e1000e->mmio + E1000_TDH_OFFSET));
 	budget &= E1000E_TX_RING_SIZE_DEFAULT - 1;
 
 	if (budget > num)
@@ -416,12 +419,10 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		    &pkt_e1000e->tx_ring[pkt_e1000e->tx_next];
 		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
 		uint32_t offset = pkt_e1000e->tx_next * E1000E_TX_BUF_SIZE;
-		uint32_t txd_cmd =
-		    E1000_TXD_CMD_IFCS | E1000_TXD_CMD_EOP |
-		    E1000_TXD_CMD_RS | E1000_TXD_CMD_IDE;
+		uint32_t txd_cmd = E1000_TXD_CMD_IFCS | E1000_TXD_CMD_EOP;
 
 		/* Skip oversized packets silently */
-		if (pkt_len > E1000E_TX_BUF_SIZE) {
+		if (odp_unlikely(pkt_len > E1000E_TX_BUF_SIZE)) {
 			tx_pkts++;
 			continue;
 		}
@@ -435,7 +436,7 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		tx_desc->upper.data = odp_cpu_to_le_32(0);
 
 		pkt_e1000e->tx_next++;
-		if (odp_unlikely(pkt_e1000e->tx_next) >= E1000E_RX_RING_SIZE_DEFAULT)
+		if (odp_unlikely(pkt_e1000e->tx_next) >= E1000E_TX_RING_SIZE_DEFAULT)
 			pkt_e1000e->tx_next = 0;
 
 		tx_pkts++;
