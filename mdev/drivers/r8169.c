@@ -313,7 +313,7 @@ static int r8169_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	refill_from = pkt_r8169->rx_next;
 
 	while (rx_pkts < num) {
-		struct r8169_rxdesc *rx_desc =
+		volatile struct r8169_rxdesc *rx_desc =
 		    &pkt_r8169->rx_ring[pkt_r8169->rx_next];
 		odp_packet_hdr_t *pkt_hdr;
 		odp_packet_t pkt;
@@ -353,7 +353,7 @@ static int r8169_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		pkt_hdr->input = pktio_entry->s.handle;
 
 		pkt_r8169->rx_next++;
-		if (pkt_r8169->rx_next >= NUM_RX_DESC)
+		if (odp_unlikely(pkt_r8169->rx_next >= NUM_RX_DESC))
 			pkt_r8169->rx_next = 0;
 
 		pkt_table[rx_pkts] = pkt;

@@ -382,7 +382,7 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		pkt_hdr->input = pktio_entry->s.handle;
 
 		pkt_e1000e->rx_next++;
-		if (pkt_e1000e->rx_next >= E1000E_RX_RING_SIZE_DEFAULT)
+		if (odp_unlikely(pkt_e1000e->rx_next >= E1000E_RX_RING_SIZE_DEFAULT))
 			pkt_e1000e->rx_next = 0;
 
 		rx_pkts++;
