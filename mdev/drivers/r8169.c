@@ -104,7 +104,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		opts[1] = 0;
 
 		pkt_r8169->tx_next++;
-		if (odp_unlikely(pkt_r8169->tx_next) >= NUM_TX_DESC)
+		if (odp_unlikely(pkt_r8169->tx_next >= NUM_TX_DESC))
 			pkt_r8169->tx_next = 0;
 
 		status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->tx_next));

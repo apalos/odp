@@ -3,8 +3,9 @@
 #include <linux/types.h>
 #include <odp/drv/byteorder.h>
 
-#define dma_wmb()
-#define dma_rmb()
+#define barrier() __asm__ __volatile__("": : :"memory")
+#define dma_wmb() barrier()
+#define dma_rmb() barrier()
 
 #define NUM_TX_DESC     64      /* Number of Tx descriptor registers */
 #define NUM_RX_DESC     256U    /* Number of Rx descriptor registers */

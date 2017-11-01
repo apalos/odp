@@ -32,10 +32,12 @@
 #include <sysfs_parse.h>
 
 #include <uapi/net_mdev.h>
+
 /* Common code. TODO: relocate */
 #if 1
-#define dma_wmb()
-#define dma_rmb()
+#define barrier() __asm__ __volatile__("": : :"memory")
+#define dma_wmb() barrier()
+#define dma_rmb() barrier()
 typedef unsigned long dma_addr_t;
 #endif
 
@@ -54,8 +56,6 @@ typedef struct {
 	union {
 #define E1000_TXD_CMD_EOP	0x01000000	/* End of Packet */
 #define E1000_TXD_CMD_IFCS	0x02000000	/* Insert FCS (Ethernet CRC) */
-#define E1000_TXD_CMD_RS	0x08000000	/* Report Status */
-#define E1000_TXD_CMD_IDE	0x80000000	/* Enable Tidv register */
 
 		odpdrv_u32le_t data;
 		struct {
@@ -436,7 +436,7 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		tx_desc->upper.data = odp_cpu_to_le_32(0);
 
 		pkt_e1000e->tx_next++;
-		if (odp_unlikely(pkt_e1000e->tx_next) >= E1000E_TX_RING_SIZE_DEFAULT)
+		if (odp_unlikely(pkt_e1000e->tx_next >= E1000E_TX_RING_SIZE_DEFAULT))
 			pkt_e1000e->tx_next = 0;
 
 		tx_pkts++;
