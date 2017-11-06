@@ -61,7 +61,7 @@ typedef struct {
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
 	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
 	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
-	char ifname[IFNAMSIZ];		/** Interface name */
+	char ifname[IFNAMSIZ + 1];	/** Interface name */
 } pktio_ops_r8169_data_t;
 
 static pktio_ops_module_t r8169_pktio_ops;
@@ -196,7 +196,7 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	char group_uuid[64]; /* 37 should be enough */
 	int group_id;
 
-	printf("r8169: probing %s\n", netdev);
+	printf("%s: probing %s\n", __func__, netdev);
 
 	/* Init pktio entry */
 	memset(pkt_r8169, 0, sizeof(*pkt_r8169));
@@ -212,6 +212,8 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 				sizeof(group_uuid));
 	if (group_id < 0)
 		return -EINVAL;
+
+	strncpy(pkt_r8169->ifname, netdev + strlen(NET_MDEV_MATCH), IFNAMSIZ);
 
 	pkt_r8169->capa.max_input_queues = 1;
 	pkt_r8169->capa.max_output_queues = 1;
@@ -277,10 +279,11 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	if (ret)
 		goto out;
 
-	strncpy(pkt_r8169->ifname, netdev, IFNAMSIZ);
 	r8169_rx_refill(pkt_r8169, 0, NUM_RX_DESC);
+
 	r8169_wait_link_up(pktio_entry);
-	printf("%s: Linkup is complete\n", __func__);
+
+	printf("%s: probing is complete\n", __func__);
 
 	return 0;
 out:
@@ -426,13 +429,10 @@ static int r8169_link_status(pktio_entry_t *pktio_entry)
 	return mdev_get_iff_link(pkt_r8169->ifname);
 }
 
+/* TODO: move to common code */
 static void r8169_wait_link_up(pktio_entry_t *pktio_entry)
 {
-	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
-	int link_up = 0;
-
-	while (!link_up) {
-		link_up = mdev_get_iff_link(pkt_r8169->ifname);
+	while (!r8169_link_status(pktio_entry)) {
 		sleep(1);
 	}
 }

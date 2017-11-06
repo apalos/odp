@@ -143,7 +143,8 @@ typedef struct {
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
 	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
 	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
-	char ifname[IFNAMSIZ];		/** Interface name */
+
+	char ifname[IFNAMSIZ + 1];	/**< Interface name */
 } pktio_ops_e1000e_data_t;
 
 static pktio_ops_module_t e1000e_pktio_ops;
@@ -167,7 +168,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	char group_uuid[64]; /* 37 should be enough */
 	int group_id;
 
-	printf("e1000e: probing %s\n", netdev);
+	printf("%s: probing %s\n", __func__, netdev);
 
 	/* Init pktio entry */
 	memset(pkt_e1000e, 0, sizeof(*pkt_e1000e));
@@ -183,6 +184,8 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 				sizeof(group_uuid));
 	if (group_id < 0)
 		return -EINVAL;
+
+	strncpy(pkt_e1000e->ifname, netdev + strlen(NET_MDEV_MATCH), IFNAMSIZ);
 
 	pkt_e1000e->capa.max_input_queues = 1;
 	pkt_e1000e->capa.max_output_queues = 1;
@@ -249,10 +252,11 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	if (ret)
 		goto out;
 
-	strncpy(pkt_e1000e->ifname, netdev, IFNAMSIZ);
 	e1000e_rx_refill(pkt_e1000e, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
+
 	e1000e_wait_link_up(pktio_entry);
-	printf("%s: Linkup is complete\n", __func__);
+
+	printf("%s: probing is complete\n", __func__);
 
 	return 0;
 out:
@@ -471,13 +475,10 @@ static int e1000e_link_status(pktio_entry_t *pktio_entry)
 	return mdev_get_iff_link(pkt_e1000e->ifname);
 }
 
+/* TODO: move to common code */
 static void e1000e_wait_link_up(pktio_entry_t *pktio_entry)
 {
-	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
-	int link_up = 0;
-
-	while (!link_up) {
-		link_up = mdev_get_iff_link(pkt_e1000e->ifname);
+	while (!e1000e_link_status(pktio_entry)) {
 		sleep(1);
 	}
 }
