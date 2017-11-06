@@ -30,6 +30,7 @@
 #include <reg_api.h>
 #include <vfio_api.h>
 #include <sysfs_parse.h>
+#include <eth_stats.h>
 
 #include <uapi/net_mdev.h>
 
@@ -142,12 +143,15 @@ typedef struct {
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
 	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
 	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
+	char ifname[IFNAMSIZ];		/** Interface name */
 } pktio_ops_e1000e_data_t;
 
 static pktio_ops_module_t e1000e_pktio_ops;
 
 static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 			     uint16_t from, uint16_t num);
+
+static void e1000e_wait_link_up(pktio_entry_t *pktio_entry);
 
 static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 		       pktio_entry_t * pktio_entry,
@@ -245,11 +249,10 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	if (ret)
 		goto out;
 
+	strncpy(pkt_e1000e->ifname, netdev, IFNAMSIZ);
 	e1000e_rx_refill(pkt_e1000e, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
-
-	printf("%s: starting initial wait\n", __func__);
-	usleep(20 * 1000 * 1000);
-	printf("%s: initial wait is complete\n", __func__);
+	e1000e_wait_link_up(pktio_entry);
+	printf("%s: Linkup is complete\n", __func__);
 
 	return 0;
 out:
@@ -461,6 +464,24 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	return tx_pkts;
 }
 
+static int e1000e_link_status(pktio_entry_t *pktio_entry)
+{
+	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
+
+	return mdev_get_iff_link(pkt_e1000e->ifname);
+}
+
+static void e1000e_wait_link_up(pktio_entry_t *pktio_entry)
+{
+	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
+	int link_up = 0;
+
+	while (!link_up) {
+		link_up = mdev_get_iff_link(pkt_e1000e->ifname);
+		sleep(1);
+	}
+}
+
 static pktio_ops_module_t e1000e_pktio_ops = {
 	.base = {
 		 .name = "e1000e",
@@ -471,6 +492,7 @@ static pktio_ops_module_t e1000e_pktio_ops = {
 
 	.recv = e1000e_recv,
 	.send = e1000e_send,
+	.link_status = e1000e_link_status,
 };
 
 /** e1000e module entry point */

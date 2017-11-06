@@ -22,6 +22,7 @@
 #include <reg_api.h>
 #include <vfio_api.h>
 #include <sysfs_parse.h>
+#include <eth_stats.h>
 
 #include <uapi/net_mdev.h>
 
@@ -60,12 +61,15 @@ typedef struct {
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
 	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
 	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
+	char ifname[IFNAMSIZ];		/** Interface name */
 } pktio_ops_r8169_data_t;
 
 static pktio_ops_module_t r8169_pktio_ops;
 
 static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 			    uint16_t from, uint16_t num);
+
+static void r8169_wait_link_up(pktio_entry_t *pktio_entry);
 
 static void r8169_flood(pktio_entry_t *pktio_entry)
 {
@@ -179,7 +183,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	return tx_pkts;
 }
 
-static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
+static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 		      const char *netdev, odp_pool_t pool)
 {
 	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
@@ -273,10 +277,10 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t * pktio_entry,
 	if (ret)
 		goto out;
 
+	strncpy(pkt_r8169->ifname, netdev, IFNAMSIZ);
 	r8169_rx_refill(pkt_r8169, 0, NUM_RX_DESC);
-	printf("%s: starting initial wait\n", __func__);
-	usleep(2 * 1000 * 1000);
-	printf("%s: initial wait is complete\n", __func__);
+	r8169_wait_link_up(pktio_entry);
+	printf("%s: Linkup is complete\n", __func__);
 
 	return 0;
 out:
@@ -351,7 +355,7 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 	}
 }
 
-static int r8169_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
+static int r8169_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		      odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
@@ -415,6 +419,23 @@ static int r8169_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	return rx_pkts;
 }
 
+static int r8169_link_status(pktio_entry_t *pktio_entry)
+{
+	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
+
+	return mdev_get_iff_link(pkt_r8169->ifname);
+}
+
+static void r8169_wait_link_up(pktio_entry_t *pktio_entry)
+{
+	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
+	int link_up = 0;
+
+	while (!link_up) {
+		link_up = mdev_get_iff_link(pkt_r8169->ifname);
+		sleep(1);
+	}
+}
 
 static pktio_ops_module_t r8169_pktio_ops = {
 	.base = {
@@ -426,6 +447,7 @@ static pktio_ops_module_t r8169_pktio_ops = {
 
 	.recv = r8169_recv,
 	.send = r8169_send,
+	.link_status = r8169_link_status,
 };
 
 /** r8169 module entry point */
