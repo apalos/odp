@@ -12,6 +12,7 @@
 #include <odp/drv/byteorder.h>
 #include <odp/api/hints.h>
 #include <odp/drv/hints.h>
+#include <odp/drv/align.h>
 
 #include <odp/api/plat/packet_inlines.h>
 #include <odp/api/packet.h>
@@ -35,45 +36,80 @@
 #define dma_wmb() barrier()
 #define dma_rmb() barrier()
 typedef unsigned long dma_addr_t;
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #endif
 
-/* TX ring definitions */
-typedef struct {
-} cxgb4_tx_desc_t;
 
-/* RX ring definitions */
+/* RX queue definitions */
+#define CXGB4_RX_QUEUE_NUM_MAX 32
+
+/** RX descriptor */
 typedef struct {
+	uint32_t padding[12];
+
+	odpdrv_u32be_t hdrbuflen_pidx;
+#define RX_DESC_NEW_BUF_FLAG	(1U << 31)
+	odpdrv_u32be_t pldbuflen_qid;
+	union {
+#define RX_DESC_GEN_MASK	(1U << 7)
+#define RX_DESC_TYPE_SHIFT	4
+#define RX_DESC_TYPE_MASK	0x3
+#define RX_DESC_TYPE_FLBUF_X	0
+#define RX_DESC_TYPE_CPL_X	1
+#define RX_DESC_TYPE_INTR_X	2
+		uint8_t type_gen;
+#define RX_DESC_TIMESTAMP_MASK	0xfffffffffffffffULL
+		odpdrv_u64be_t last_flit;
+	};
 } cxgb4_rx_desc_t;
+
+/** RX queue data */
+typedef struct {
+	cxgb4_rx_desc_t *desc;		/**< RX queue base */
+
+	odpdrv_u64be_t *free_list;	/**< Free list base */
+	uint16_t cidx;			/**< Free list consumer index */
+	uint16_t pidx;			/**< Free list producer index */
+	uint16_t offset;		/**< Offset into last free fragment */
+	uint16_t free_list_len;		/**< Free list length (in uint64_t) */
+
+	struct iomem rx_data;		/**< RX packet payload mmap */
+
+	odpdrv_u32be_t *doorbell;	/**< Free list refill doorbell */
+	uint32_t qhandle;		/**< 'Key' to the doorbell */
+	uint32_t padding;
+} cxgb4_rx_queue_t ODPDRV_ALIGNED(_ODP_CACHE_LINE_SIZE);
+
+/* TX queue definitions */
+#define CXGB4_TX_QUEUE_NUM_MAX 32
+
+/** TX queue data */
+typedef struct {
+} cxgb4_tx_queue_t ODPDRV_ALIGNED(_ODP_CACHE_LINE_SIZE);
 
 /** Packet socket using mediated cxgb4 device */
 typedef struct {
-	/* TODO: cache align everything when we have profiling information */
+	/** RX queue hot data */
+	cxgb4_rx_queue_t rx_queues[CXGB4_RX_QUEUE_NUM_MAX];
+
+	/** TX queue hot data */
+	cxgb4_tx_queue_t tx_queues[CXGB4_TX_QUEUE_NUM_MAX];
+
+	/** RX queue locks */
+	odp_ticketlock_t rx_locks[CXGB4_RX_QUEUE_NUM_MAX];
+	odp_ticketlock_t tx_locks[CXGB4_TX_QUEUE_NUM_MAX];
+
 	odp_pool_t pool;		/**< pool to alloc packets from */
-
-	void *mmio;			/**< BAR0 mmap */
-
-	/* RX ring hot data */
 	odp_bool_t lockless_rx;		/**< no locking for RX */
-	odp_ticketlock_t rx_lock;	/**< RX ring lock */
-	cxgb4_rx_desc_t *rx_ring;	/**< RX ring mmap */
-	struct iomem rx_data;		/**< RX packet payload mmap */
-	uint16_t rx_next;		/**< next entry in RX ring to use */
-
-	/* TX ring hot data */
 	odp_bool_t lockless_tx;		/**< no locking for TX */
-	odp_ticketlock_t tx_lock;	/**< TX ring lock */
-	cxgb4_tx_desc_t *tx_ring;	/**< TX ring mmap */
-	struct iomem tx_data;		/**< TX packet payload mmap */
-	uint16_t tx_next;		/**< next entry in TX ring to use */
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
 	int device;			/**< VFIO device */
 	int group;			/**< VFIO group */
 
+	void *mmio;			/**< BAR0 mmap */
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
-	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
-	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
 
 	char ifname[IFNAMSIZ + 1];	/**< Interface name */
 } pktio_ops_cxgb4_data_t;
@@ -95,11 +131,11 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
 	struct vfio_device_info device_info = { .argsz = sizeof(device_info) };
 	int container = -1, group = -1, device = -1;
-	int ret;
-	void *iobase, *iocur;
+	void *iobase, *iocur ODP_UNUSED;
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
 	char group_uuid[64]; /* 37 should be enough */
 	int group_id;
+	uint32_t i;
 
 	printf("%s: probing %s\n", __func__, netdev);
 
@@ -120,11 +156,14 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 
 	strncpy(pkt_cxgb4->ifname, netdev + strlen(NET_MDEV_MATCH), IFNAMSIZ);
 
-	pkt_cxgb4->capa.max_input_queues = 1;
-	pkt_cxgb4->capa.max_output_queues = 1;
+	for (i = 0; i < ARRAY_SIZE(pkt_cxgb4->rx_locks); i++)
+		odp_ticketlock_init(&pkt_cxgb4->rx_locks[i]);
+	for (i = 0; i < ARRAY_SIZE(pkt_cxgb4->tx_locks); i++)
+		odp_ticketlock_init(&pkt_cxgb4->tx_locks[i]);
 
-	odp_ticketlock_init(&pkt_cxgb4->rx_lock);
-	odp_ticketlock_init(&pkt_cxgb4->tx_lock);
+	// TODO: these shall be filled in during VFIO region info parsing
+	// pkt_cxgb4->capa.max_input_queues = 1;
+	// pkt_cxgb4->capa.max_output_queues = 1;
 
 	/* FIXME iobase and container(probably) has to be done globally and not per driver */
 	iobase = iomem_init();
@@ -142,6 +181,7 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 
 	device = vfio_init_dev(group, container, &group_status, &iommu_info,
 			       &device_info, group_uuid);
+
 	if (device < 0)
 		goto out;
 	pkt_cxgb4->device = device;
@@ -153,6 +193,7 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 		goto out;
 	}
 
+#if 0
 	pkt_cxgb4->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_RX_REGION_INDEX,
 					      &pkt_cxgb4->rx_ring_len);
@@ -184,6 +225,7 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 	ret = iomem_alloc_dma(device, &iocur, &pkt_cxgb4->tx_data);
 	if (ret)
 		goto out;
+#endif
 
 	// cxgb4_rx_refill(pkt_cxgb4, 0, ???);
 
@@ -195,6 +237,7 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 out:
 	if (group > 0)
 		close(group);
+#if 0
 	if (pkt_cxgb4->tx_data.vaddr)
 		iomem_free_dma(device, &pkt_cxgb4->tx_data);
 	if (pkt_cxgb4->rx_data.vaddr)
@@ -203,6 +246,7 @@ out:
 		munmap(pkt_cxgb4->tx_ring, pkt_cxgb4->tx_ring_len);
 	if (pkt_cxgb4->rx_ring)
 		munmap(pkt_cxgb4->rx_ring, pkt_cxgb4->rx_ring_len);
+#endif
 	if (pkt_cxgb4->mmio)
 		munmap(pkt_cxgb4->mmio, pkt_cxgb4->mmio_len);
 	if (container > 0)
@@ -220,6 +264,7 @@ static int cxgb4_close(pktio_entry_t *pktio_entry)
 
 	if (pkt_cxgb4->group > 0)
 		close(pkt_cxgb4->group);
+#if 0
 	if (pkt_cxgb4->tx_data.vaddr)
 		iomem_free_dma(pkt_cxgb4->device, &pkt_cxgb4->tx_data);
 	if (pkt_cxgb4->rx_data.vaddr)
@@ -228,6 +273,7 @@ static int cxgb4_close(pktio_entry_t *pktio_entry)
 		munmap(pkt_cxgb4->tx_ring, pkt_cxgb4->tx_ring_len);
 	if (pkt_cxgb4->rx_ring)
 		munmap(pkt_cxgb4->rx_ring, pkt_cxgb4->rx_ring_len);
+#endif
 	if (pkt_cxgb4->mmio)
 		munmap(pkt_cxgb4->mmio, pkt_cxgb4->mmio_len);
 
