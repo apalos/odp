@@ -37,6 +37,8 @@
 #define dma_rmb() barrier()
 typedef unsigned long dma_addr_t;
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #endif
 
 
@@ -51,7 +53,8 @@ typedef struct {
 #define RX_DESC_NEW_BUF_FLAG	(1U << 31)
 	odpdrv_u32be_t pldbuflen_qid;
 	union {
-#define RX_DESC_GEN_MASK	(1U << 7)
+#define RX_DESC_GEN_SHIFT	7
+#define RX_DESC_GEN_MASK	0x1
 #define RX_DESC_TYPE_SHIFT	4
 #define RX_DESC_TYPE_MASK	0x3
 #define RX_DESC_TYPE_FLBUF_X	0
@@ -63,11 +66,20 @@ typedef struct {
 	};
 } cxgb4_rx_desc_t;
 
+#define RX_DESC_TO_GEN(rxd) \
+	(((rxd)->type_gen >> RX_DESC_GEN_SHIFT) & RX_DESC_GEN_MASK)
+#define RX_DESC_TO_TYPE(rxd) \
+	(((rxd)->type_gen >> RX_DESC_TYPE_SHIFT) & RX_DESC_TYPE_MASK)
+
 /** RX queue data */
 typedef struct {
-	cxgb4_rx_desc_t *desc;		/**< RX queue base */
+	uint32_t gen:1;			/**< RX queue generation */
 
-	struct iomem rx_data;		/**< RX packet payload mmap */
+	uint32_t rx_data_size;		/**< RX packet payload area size */
+	uint8_t *rx_data_base;		/**< RX packet payload area VA */
+	uint64_t rx_iova_base;		/**< RX packet payload area IOVA */
+
+	cxgb4_rx_desc_t *desc;		/**< RX queue base */
 
 	odpdrv_u64be_t *free_list;	/**< Free list base */
 
@@ -84,14 +96,14 @@ typedef struct {
 	uint8_t pidx;			/**< Free list producer index */
 
 	uint32_t offset;		/**< Offset into last free fragment */
-} cxgb4_rx_queue_t ODPDRV_ALIGNED(_ODP_CACHE_LINE_SIZE);
+} cxgb4_rx_queue_t ODPDRV_ALIGNED_CACHE;
 
 /* TX queue definitions */
 #define CXGB4_TX_QUEUE_NUM_MAX 32
 
 /** TX queue data */
 typedef struct {
-} cxgb4_tx_queue_t ODPDRV_ALIGNED(_ODP_CACHE_LINE_SIZE);
+} cxgb4_tx_queue_t ODPDRV_ALIGNED_CACHE;
 
 /** Packet socket using mediated cxgb4 device */
 typedef struct {
@@ -296,7 +308,7 @@ static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num)
 	rxq->commit_pending += num;
 
 	while (num) {
-		uint64_t iova = rxq->rx_data.iova + rxq->pidx * ODP_PAGE_SIZE;
+		uint64_t iova = rxq->rx_iova_base + rxq->pidx * ODP_PAGE_SIZE;
 
 		rxq->free_list[rxq->pidx] = odpdrv_cpu_to_be_64(iova);
 
@@ -318,11 +330,119 @@ static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num)
 	}
 }
 
-static int cxgb4_recv(pktio_entry_t * pktio_entry ODP_UNUSED,
-		       int index ODP_UNUSED, odp_packet_t pkt_table[] ODP_UNUSED,
-		       int num ODP_UNUSED)
+static int cxgb4_recv(pktio_entry_t * pktio_entry,
+		      int index, odp_packet_t pkt_table[], int num)
 {
-	return 0;
+	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
+	cxgb4_rx_queue_t *rxq = &pkt_cxgb4->rx_queues[index];
+	uint16_t refill_count = 0;
+	int rx_pkts = 0;
+
+	if (!pkt_cxgb4->lockless_rx)
+		odp_ticketlock_lock(&pkt_cxgb4->rx_locks[index]);
+
+	while (num) {
+		volatile cxgb4_rx_desc_t *rxd = &rxq->desc[rxq->rx_next];
+		odp_packet_t pkt;
+		uint32_t pkt_len, offset;
+		uint8_t type;
+		int ret;
+
+		if (RX_DESC_TO_GEN(rxd) != rxq->gen)
+			break;
+
+		type = RX_DESC_TO_TYPE(rxd);
+
+		if (odp_unlikely(type != RX_DESC_TYPE_FLBUF_X)) {
+			// ODP_ERR("Invalid rxd type %u\n", type);
+			printf("Invalid rxd type %u, skipping\n", type);
+
+			rxq->rx_next++;
+			if (odp_unlikely(rxq->rx_next >= rxq->rx_queue_len))
+				rxq->rx_next = 0;
+
+			continue;
+		}
+
+		pkt_len = odpdrv_be_to_cpu_32(rxd->pldbuflen_qid);
+
+		/*
+		 * HW skips trailing area in current RX buffer and starts in the
+		 * next one from the beginning.
+		 */
+		if (pkt_len & RX_DESC_NEW_BUF_FLAG) {
+			rxq->offset = 0;
+
+			rxq->cidx++;
+			if (odp_unlikely(rxq->cidx >= rxq->free_list_len))
+				rxq->cidx = 0;
+
+			pkt_len ^= RX_DESC_NEW_BUF_FLAG;
+
+			refill_count++;
+		}
+
+		/*
+		 * We can't stop from now on. In case of failure -- update RX
+		 * queue and free list properly and drop the packet.
+		 */
+		ret = 0;
+
+		pkt = odp_packet_alloc(pkt_cxgb4->pool, pkt_len);
+		if (odp_unlikely(pkt == ODP_PACKET_INVALID))
+			ret = -1;
+
+		offset = 0; /* TODO: any better name for this */
+		while (offset <= pkt_len) {
+			void *from =
+			    rxq->rx_data_base + rxq->cidx * ODP_PAGE_SIZE +
+			    rxq->offset;
+			uint32_t len =
+			    MIN(pkt_len - offset, ODP_PAGE_SIZE - rxq->offset);
+
+			if (!ret)
+				ret =
+				    odp_packet_copy_from_mem(pkt, offset, len,
+							     from);
+
+			offset += len;
+
+			rxq->cidx++;
+			if (odp_unlikely(rxq->cidx >= rxq->free_list_len))
+				rxq->cidx = 0;
+
+			rxq->offset = 0;
+		}
+
+		/* TODO: fl_align shall be in capabilities */
+		rxq->offset = ROUNDUP_ALIGN(rxq->offset, 64);
+
+		rxq->rx_next++;
+		if (odp_unlikely(rxq->rx_next >= rxq->rx_queue_len)) {
+			rxq->rx_next = 0;
+			rxq->gen ^= 1;
+		}
+
+		if (odp_likely(!ret)) {
+			odp_packet_hdr_t *pkt_hdr;
+
+			pkt_hdr = odp_packet_hdr(pkt);
+			pkt_hdr->input = pktio_entry->s.handle;
+
+			pkt_table[rx_pkts] = pkt;
+			rx_pkts++;
+		}
+
+		num--;
+	}
+
+	if (refill_count)
+		cxgb4_rx_refill(rxq, refill_count);
+
+	if (!pkt_cxgb4->lockless_rx)
+		odp_ticketlock_unlock(&pkt_cxgb4->rx_locks[index]);
+
+	return rx_pkts;
 }
 
 static int cxgb4_send(pktio_entry_t * pktio_entry ODP_UNUSED,
