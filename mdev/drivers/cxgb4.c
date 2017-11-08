@@ -67,17 +67,23 @@ typedef struct {
 typedef struct {
 	cxgb4_rx_desc_t *desc;		/**< RX queue base */
 
-	odpdrv_u64be_t *free_list;	/**< Free list base */
-	uint16_t cidx;			/**< Free list consumer index */
-	uint16_t pidx;			/**< Free list producer index */
-	uint16_t offset;		/**< Offset into last free fragment */
-	uint16_t free_list_len;		/**< Free list length (in uint64_t) */
-
 	struct iomem rx_data;		/**< RX packet payload mmap */
+
+	odpdrv_u64be_t *free_list;	/**< Free list base */
 
 	odpdrv_u32be_t *doorbell;	/**< Free list refill doorbell */
 	uint32_t qhandle;		/**< 'Key' to the doorbell */
-	uint32_t padding;
+
+	uint16_t rx_queue_len;		/**< Number of RX desc entries */
+	uint16_t rx_next;		/**< Next RX desc to handle */
+
+	uint8_t free_list_len;		/**< Number of free list entries */
+	uint8_t commit_pending;		/**< Free list entries pending commit */
+
+	uint8_t cidx;			/**< Free list consumer index */
+	uint8_t pidx;			/**< Free list producer index */
+
+	uint32_t offset;		/**< Offset into last free fragment */
 } cxgb4_rx_queue_t ODPDRV_ALIGNED(_ODP_CACHE_LINE_SIZE);
 
 /* TX queue definitions */
@@ -116,10 +122,7 @@ typedef struct {
 
 static pktio_ops_module_t cxgb4_pktio_ops;
 
-#if 0
-static void cxgb4_rx_refill(pktio_ops_cxgb4_data_t *pkt_cxgb4,
-			     uint16_t from, uint16_t num);
-#endif
+static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num);
 
 static void cxgb4_wait_link_up(pktio_entry_t *pktio_entry);
 
@@ -227,7 +230,15 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 		goto out;
 #endif
 
-	// cxgb4_rx_refill(pkt_cxgb4, 0, ???);
+	for (i = 0; i < ARRAY_SIZE(pkt_cxgb4->rx_queues); i++) {
+		cxgb4_rx_queue_t *rxq = &pkt_cxgb4->rx_queues[i];
+
+		/*
+		 * Leave 1 HW block (8 entries) unpopulated,
+		 * otherwise HW will think the free list is empty.
+		 */
+		cxgb4_rx_refill(rxq, rxq->free_list_len - 8);
+	}
 
 	cxgb4_wait_link_up(pktio_entry);
 
@@ -280,12 +291,32 @@ static int cxgb4_close(pktio_entry_t *pktio_entry)
 	return 0;
 }
 
-#if 0
-static void cxgb4_rx_refill(pktio_ops_cxgb4_data_t * pkt_cxgb4,
-			    uint16_t from, uint16_t num)
+static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num)
 {
+	rxq->commit_pending += num;
+
+	while (num) {
+		uint64_t iova = rxq->rx_data.iova + rxq->pidx * ODP_PAGE_SIZE;
+
+		rxq->free_list[rxq->pidx] = odpdrv_cpu_to_be_64(iova);
+
+		rxq->pidx++;
+		if (odp_unlikely(rxq->pidx >= rxq->free_list_len))
+			rxq->pidx = 0;
+
+		num--;
+	}
+
+	/* We commit free list entries to HW in packs of 8 */
+	if (rxq->commit_pending >= 8) {
+		uint32_t val = rxq->qhandle | (rxq->commit_pending / 8);
+
+		dma_wmb();
+		io_write32(odp_cpu_to_be_32(val), rxq->doorbell);
+
+		rxq->commit_pending &= 7;
+	}
 }
-#endif
 
 static int cxgb4_recv(pktio_entry_t * pktio_entry ODP_UNUSED,
 		       int index ODP_UNUSED, odp_packet_t pkt_table[] ODP_UNUSED,
