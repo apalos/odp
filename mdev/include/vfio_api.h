@@ -1,18 +1,24 @@
 #ifndef _VFIO_API_H
 #define _VFIO_API_H
 #include <linux/vfio.h>
-int get_container(void);
-int get_group(int grp_id);
-int dma_map_type1(int fd, unsigned long sz, void **vaddr, uint64_t iova);
-int dma_unmap_type1(int fd, unsigned long sz, void *vaddr, uint64_t iova);
-int get_group(int grp_id);
-int get_container(void);
-int vfio_init_dev(int grp, int container, struct vfio_group_status *grp_status,
-		  struct vfio_iommu_type1_info *iommu_info,
-		  struct vfio_device_info *dev_info, char *grp_uuid);
-int vfio_get_region(int device, struct vfio_region_info *reg_info, __u32 region);
-void *vfio_mmap_region(int device, __u32 region, size_t *len);
-int iomem_alloc_dma(int device, void **iomem_curent, struct iomem *iomem);
-int iomem_free_dma(int device, struct iomem *iomem);
+
+typedef struct {
+	int container;
+	int group;
+	int device;
+
+	int group_id;
+	char group_uuid[64];
+
+	uint8_t *iobase;
+	uint8_t *iocur;
+} mdev_device_t;
+
+int mdev_device_create(mdev_device_t *mdev, const char *mod_name, const char *if_name);
+void mdev_device_destroy(mdev_device_t *mdev);
+
+void *vfio_mmap_region(mdev_device_t *mdev, __u32 region, size_t *len);
+int iomem_alloc_dma(mdev_device_t *mdev, struct iomem *iomem);
+int iomem_free_dma(mdev_device_t *mdev, struct iomem *iomem);
 
 #endif

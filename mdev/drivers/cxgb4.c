@@ -125,31 +125,24 @@ typedef struct {
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
-	int device;			/**< VFIO device */
-	int group;			/**< VFIO group */
-
 	void *mmio;			/**< BAR0 mmap */
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
+
+	mdev_device_t mdev;		/**< Common mdev data */
 
 	char if_name[IF_NAMESIZE];	/**< Interface name */
 } pktio_ops_cxgb4_data_t;
 
 static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num);
 static void cxgb4_wait_link_up(pktio_entry_t *pktio_entry);
+static int cxgb4_close(pktio_entry_t *pktio_entry);
 
 static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 		       pktio_entry_t * pktio_entry,
 		       const char *resource, odp_pool_t pool)
 {
-	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
-	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
-	struct vfio_device_info device_info = { .argsz = sizeof(device_info) };
-	int container = -1, group = -1, device = -1;
-	void *iobase, *iocur ODP_UNUSED;
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
-	char group_uuid[64]; /* 37 should be enough */
-	int group_id;
-	uint32_t i;
+	int ret;
 
 	// ODP_ASSERT(pool != ODP_POOL_INVALID);
 
@@ -163,87 +156,18 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 
 	printf("%s: open %s\n", MODULE_NAME, pkt_cxgb4->if_name);
 
+	ret = mdev_device_create(&pkt_cxgb4->mdev, MODULE_NAME, pkt_cxgb4->if_name);
+	if (ret)
+		goto out;
+
 	pkt_cxgb4->pool = pool;
 
-	memset(group_uuid, 0, sizeof(group_uuid));
-	group_id =
-	    mdev_sysfs_discover(MODULE_NAME, pkt_cxgb4->if_name, group_uuid,
-				sizeof(group_uuid));
-	if (group_id < 0)
-		return -EINVAL;
-
-	for (i = 0; i < ARRAY_SIZE(pkt_cxgb4->rx_locks); i++)
+	for (uint32_t i = 0; i < ARRAY_SIZE(pkt_cxgb4->rx_locks); i++)
 		odp_ticketlock_init(&pkt_cxgb4->rx_locks[i]);
-	for (i = 0; i < ARRAY_SIZE(pkt_cxgb4->tx_locks); i++)
+	for (uint32_t i = 0; i < ARRAY_SIZE(pkt_cxgb4->tx_locks); i++)
 		odp_ticketlock_init(&pkt_cxgb4->tx_locks[i]);
 
-	// TODO: these shall be filled in during VFIO region info parsing
-	// pkt_cxgb4->capa.max_input_queues = 1;
-	// pkt_cxgb4->capa.max_output_queues = 1;
-
-	/* FIXME iobase and container(probably) has to be done globally and not per driver */
-	iobase = iomem_init();
-	if (!iobase)
-		return -ENOMEM;
-	iocur = iobase;
-	container = get_container();
-	if (container < 0)
-		goto out;
-
-	group = get_group(group_id);
-	if (group < 0)
-		goto out;
-	pkt_cxgb4->group = group;
-
-	device = vfio_init_dev(group, container, &group_status, &iommu_info,
-			       &device_info, group_uuid);
-
-	if (device < 0)
-		goto out;
-	pkt_cxgb4->device = device;
-
-	/* Init device and mmaps */
-	pkt_cxgb4->mmio = vfio_mmap_region(device, 0, &pkt_cxgb4->mmio_len);
-	if (!pkt_cxgb4->mmio) {
-		printf("Cannot map MMIO\n");
-		goto out;
-	}
-
-#if 0
-	pkt_cxgb4->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
-					      VFIO_NET_MDEV_RX_REGION_INDEX,
-					      &pkt_cxgb4->rx_ring_len);
-	if (!pkt_cxgb4->rx_ring) {
-		printf("Cannot map RxRing\n");
-		goto out;
-	}
-	pkt_cxgb4->tx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
-					      VFIO_NET_MDEV_TX_REGION_INDEX,
-					      &pkt_cxgb4->tx_ring_len);
-	if (!pkt_cxgb4->tx_ring) {
-		printf("Cannot map TxRing\n");
-		goto out;
-	}
-
-	/* TODO: we shall pass only 2 params to iomem_alloc_dma(): fd and iomem
-	 * requested size can be in iomem->size.
-	 * function will fill in vaddr and iova.
-	 */
-	/* FIXME decide on allocated areas per hardware instead of getting 2MB
-	 * per direction
-	 */
-	pkt_cxgb4->rx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(device, &iocur, &pkt_cxgb4->rx_data);
-	if (ret)
-		goto out;
-
-	pkt_cxgb4->tx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(device, &iocur, &pkt_cxgb4->tx_data);
-	if (ret)
-		goto out;
-#endif
-
-	for (i = 0; i < ARRAY_SIZE(pkt_cxgb4->rx_queues); i++) {
+	for (uint32_t i = 0; i < ARRAY_SIZE(pkt_cxgb4->rx_queues); i++) {
 		cxgb4_rx_queue_t *rxq = &pkt_cxgb4->rx_queues[i];
 
 		/*
@@ -255,28 +179,12 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 
 	cxgb4_wait_link_up(pktio_entry);
 
-	printf("%s: probing is complete\n", __func__);
+	printf("%s: open %s is successful\n", MODULE_NAME, pkt_cxgb4->if_name);
 
 	return 0;
+
 out:
-	if (group > 0)
-		close(group);
-#if 0
-	if (pkt_cxgb4->tx_data.vaddr)
-		iomem_free_dma(device, &pkt_cxgb4->tx_data);
-	if (pkt_cxgb4->rx_data.vaddr)
-		iomem_free_dma(device, &pkt_cxgb4->rx_data);
-	if (pkt_cxgb4->tx_ring)
-		munmap(pkt_cxgb4->tx_ring, pkt_cxgb4->tx_ring_len);
-	if (pkt_cxgb4->rx_ring)
-		munmap(pkt_cxgb4->rx_ring, pkt_cxgb4->rx_ring_len);
-#endif
-	if (pkt_cxgb4->mmio)
-		munmap(pkt_cxgb4->mmio, pkt_cxgb4->mmio_len);
-	if (container > 0)
-		close(container);
-	if (iobase)
-		iomem_free(iobase);
+	cxgb4_close(pktio_entry);
 
 	return -1;
 }
@@ -288,18 +196,8 @@ static int cxgb4_close(pktio_entry_t *pktio_entry)
 
 	printf("%s: close %s\n", MODULE_NAME, pkt_cxgb4->if_name);
 
-	if (pkt_cxgb4->group > 0)
-		close(pkt_cxgb4->group);
-#if 0
-	if (pkt_cxgb4->tx_data.vaddr)
-		iomem_free_dma(pkt_cxgb4->device, &pkt_cxgb4->tx_data);
-	if (pkt_cxgb4->rx_data.vaddr)
-		iomem_free_dma(pkt_cxgb4->device, &pkt_cxgb4->rx_data);
-	if (pkt_cxgb4->tx_ring)
-		munmap(pkt_cxgb4->tx_ring, pkt_cxgb4->tx_ring_len);
-	if (pkt_cxgb4->rx_ring)
-		munmap(pkt_cxgb4->rx_ring, pkt_cxgb4->rx_ring_len);
-#endif
+	mdev_device_destroy(&pkt_cxgb4->mdev);
+
 	if (pkt_cxgb4->mmio)
 		munmap(pkt_cxgb4->mmio, pkt_cxgb4->mmio_len);
 

@@ -35,12 +35,6 @@ typedef unsigned long dma_addr_t;
 
 /** Packet socket using mediated r8169 device */
 typedef struct {
-	/* TODO: cache align everything when we have profiling information */
-	odp_pool_t pool;		/**< pool to alloc packets from */
-
-	/* volatile void *mmio; */
-	void *mmio;		/**< BAR2 mmap */
-
 	/* RX ring hot data */
 	odp_bool_t lockless_rx;		/**< no locking for RX */
 	odp_ticketlock_t rx_lock;	/**< RX ring lock */
@@ -57,19 +51,23 @@ typedef struct {
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
-	int device;			/**< VFIO device */
-	int group;			/**< VFIO group */
+	odp_pool_t pool;		/**< pool to alloc packets from */
 
+	void *mmio;			/**< MMIO mmap */
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
+
 	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
 	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
+
+	mdev_device_t mdev;		/**< Common mdev data */
+
 	char if_name[IF_NAMESIZE];	/** Interface name */
 } pktio_ops_r8169_data_t;
 
 static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 			    uint16_t from, uint16_t num);
-
 static void r8169_wait_link_up(pktio_entry_t *pktio_entry);
+static int r8169_close(pktio_entry_t *pktio_entry);
 
 static void r8169_flood(pktio_entry_t *pktio_entry)
 {
@@ -186,15 +184,8 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 		      const char *resource, odp_pool_t pool)
 {
-	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
-	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
-	struct vfio_device_info device_info = { .argsz = sizeof(device_info) };
-	int container = -1, group = -1, device = -1;
-	int ret = -EINVAL;
-	void *iobase, *iocur;
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
-	char group_uuid[64]; /* 37 should be enough */
-	int group_id;
+	int ret;
 
 	// ODP_ASSERT(pool != ODP_POOL_INVALID);
 
@@ -208,14 +199,11 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 
 	printf("%s: open %s\n", MODULE_NAME, pkt_r8169->if_name);
 
-	pkt_r8169->pool = pool;
+	ret = mdev_device_create(&pkt_r8169->mdev, MODULE_NAME, pkt_r8169->if_name);
+	if (ret)
+		goto out;
 
-	memset(group_uuid, 0, sizeof(group_uuid));
-	group_id =
-	    mdev_sysfs_discover(MODULE_NAME, pkt_r8169->if_name, group_uuid,
-				sizeof(group_uuid));
-	if (group_id < 0)
-		return -EINVAL;
+	pkt_r8169->pool = pool;
 
 	pkt_r8169->capa.max_input_queues = 1;
 	pkt_r8169->capa.max_output_queues = 1;
@@ -223,40 +211,20 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	odp_ticketlock_init(&pkt_r8169->rx_lock);
 	odp_ticketlock_init(&pkt_r8169->tx_lock);
 
-	/* FIXME iobase and container(probably) has to be done globally and not per driver */
-	iobase = iomem_init();
-	if (!iobase)
-		return -ENOMEM;
-	iocur = iobase;
-	container = get_container();
-	if (container < 0)
-		goto out;
-
-	group = get_group(group_id);
-	if (group < 0)
-		goto out;
-	pkt_r8169->group = group;
-
-	device = vfio_init_dev(group, container, &group_status, &iommu_info,
-			       &device_info, group_uuid);
-	if (device < 0)
-		goto out;
-	pkt_r8169->device = device;
-
-	pkt_r8169->mmio = vfio_mmap_region(device, 2, &pkt_r8169->mmio_len);
+	pkt_r8169->mmio = vfio_mmap_region(&pkt_r8169->mdev, 2, &pkt_r8169->mmio_len);
 	if (!pkt_r8169->mmio) {
 		printf("Cannot map MMIO\n");
 		goto out;
 	}
 
-	pkt_r8169->rx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
+	pkt_r8169->rx_ring = vfio_mmap_region(&pkt_r8169->mdev, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_RX_REGION_INDEX,
 					      &pkt_r8169->rx_ring_len);
 	if (!pkt_r8169->rx_ring) {
 		printf("Cannot map RxRing\n");
 		goto out;
 	}
-	pkt_r8169->tx_ring = vfio_mmap_region(device, VFIO_PCI_NUM_REGIONS +
+	pkt_r8169->tx_ring = vfio_mmap_region(&pkt_r8169->mdev, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_TX_REGION_INDEX,
 					      &pkt_r8169->tx_ring_len);
 	if (!pkt_r8169->tx_ring) {
@@ -264,20 +232,16 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 		goto out;
 	}
 
-	/* TODO: we shall pass only 2 params to iomem_alloc_dma(): fd and iomem
-	 * requested size can be in iomem->size.
-	 * function will fill in vaddr and iova.
-	 */
 	/* FIXME decide on allocated areas per hardware instead of getting 2MB
 	 * per direction
 	 */
 	pkt_r8169->rx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(device, &iocur, &pkt_r8169->rx_data);
+	ret = iomem_alloc_dma(&pkt_r8169->mdev, &pkt_r8169->rx_data);
 	if (ret)
 		goto out;
 
 	pkt_r8169->tx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(device, &iocur, &pkt_r8169->tx_data);
+	ret = iomem_alloc_dma(&pkt_r8169->mdev, &pkt_r8169->tx_data);
 	if (ret)
 		goto out;
 
@@ -285,43 +249,28 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 
 	r8169_wait_link_up(pktio_entry);
 
-	printf("%s: probing is complete\n", __func__);
+	printf("%s: open %s is successful\n", MODULE_NAME, pkt_r8169->if_name);
 
 	return 0;
+
 out:
-	if (group > 0)
-		close(group);
-	if (pkt_r8169->tx_data.vaddr)
-		iomem_free_dma(device, &pkt_r8169->tx_data);
-	if (pkt_r8169->rx_data.vaddr)
-		iomem_free_dma(device, &pkt_r8169->rx_data);
-	if (pkt_r8169->tx_ring)
-		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_ring_len);
-	if (pkt_r8169->rx_ring)
-		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_ring_len);
-	if (pkt_r8169->mmio)
-		munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
-	if (container > 0)
-		close(container);
-	if (iobase)
-		iomem_free(iobase);
+	r8169_close(pktio_entry);
 
 	return -1;
 }
 
-/* FIXME decide on iobase and container and free accordingly */
-static int r8169_close(pktio_entry_t * pktio_entry)
+static int r8169_close(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 
 	printf("%s: close %s\n", MODULE_NAME, pkt_r8169->if_name);
 
-	if (pkt_r8169->group > 0)
-		close(pkt_r8169->group);
+	mdev_device_destroy(&pkt_r8169->mdev);
+
 	if (pkt_r8169->tx_data.vaddr)
-		iomem_free_dma(pkt_r8169->device, &pkt_r8169->tx_data);
+		iomem_free_dma(&pkt_r8169->mdev, &pkt_r8169->tx_data);
 	if (pkt_r8169->rx_data.vaddr)
-		iomem_free_dma(pkt_r8169->device, &pkt_r8169->rx_data);
+		iomem_free_dma(&pkt_r8169->mdev, &pkt_r8169->rx_data);
 	if (pkt_r8169->tx_ring)
 		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_ring_len);
 	if (pkt_r8169->rx_ring)

@@ -12,10 +12,12 @@
 #include <stdlib.h>
 
 #include <odp_posix_extensions.h>
+#include <odp/api/hints.h>
 
 #include <common.h>
 #include <uapi/net_mdev.h>
 #include <vfio_api.h>
+#include <sysfs_parse.h>
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 static const char *vfio_fail_str[] = {
@@ -49,7 +51,7 @@ static void vfio_print_fail(unsigned int reason)
  * returns a valid VFIO container
  * fd must be closed by caller
  */
-int get_container(void)
+static int get_container(void)
 {
 	int ret;
 	int container;
@@ -82,7 +84,7 @@ out:
  * returns a valid VFIO group
  * fd must be close by caller
  */
-int get_group(int grp_id)
+static int get_group(int grp_id)
 {
 	char path[64];
 	int ret;
@@ -223,14 +225,14 @@ static int vfio_get_region_cap_type(int device, struct vfio_region_info *region_
 /**
  * Get specific region info
  */
-int vfio_get_region(int device, struct vfio_region_info *region_info,
-		    __u32 region)
+static int vfio_get_region(mdev_device_t * mdev,
+			   struct vfio_region_info *region_info, __u32 region)
 {
 	int ret;
 	__u16 id = VFIO_REGION_INFO_CAP_TYPE;
 
 	region_info->index = region;
-	ret = ioctl(device, VFIO_DEVICE_GET_REGION_INFO, region_info);
+	ret = ioctl(mdev->device, VFIO_DEVICE_GET_REGION_INFO, region_info);
 	printf("Region:%d ", region);
 	if (ret < 0) {
 		vfio_print_fail(VFIO_DEVICE_GET_REGION_INFO);
@@ -245,9 +247,9 @@ int vfio_get_region(int device, struct vfio_region_info *region_info,
 	 * BAR regions are sparse mmaps
 	 */
 	if (id == VFIO_REGION_INFO_CAP_TYPE)
-		ret = vfio_get_region_cap_type(device, region_info);
+		ret = vfio_get_region_cap_type(mdev->device, region_info);
 	else if (id == VFIO_REGION_INFO_CAP_SPARSE_MMAP)
-		ret = vfio_get_region_sparse_mmaps(device, region_info);
+		ret = vfio_get_region_sparse_mmaps(mdev->device, region_info);
 
 	return ret;
 }
@@ -255,13 +257,13 @@ int vfio_get_region(int device, struct vfio_region_info *region_info,
 /**
  * mmap a PCI region
  */
-void *vfio_mmap_region(int device, __u32 region, size_t *len)
+void *vfio_mmap_region(mdev_device_t *mdev, __u32 region, size_t *len)
 {
 	int ret;
 	struct vfio_region_info region_info = { .argsz = sizeof(region_info) };
 	void *mapped;
 
-	ret = vfio_get_region(device, &region_info, region);
+	ret = vfio_get_region(mdev, &region_info, region);
 	/* api returns -EINVAL for unimplemented bars */
 	if (!region_info.size || ret)
 		return NULL;
@@ -273,7 +275,7 @@ void *vfio_mmap_region(int device, __u32 region, size_t *len)
 		return NULL;
 
 	mapped = mmap(NULL, region_info.size, PROT_READ | PROT_WRITE,
-		      MAP_SHARED, device, region_info.offset);
+		      MAP_SHARED, mdev->device, region_info.offset);
 	if (mapped == MAP_FAILED) {
 		printf("mmap failed\n");
 		return NULL;
@@ -286,8 +288,7 @@ void *vfio_mmap_region(int device, __u32 region, size_t *len)
 /**
  * allocate portion of the 4GB space reserved by iomem_init()
  */
-int iomem_alloc_dma(int device, void **iomem_current,
-		    struct iomem *iomem)
+int iomem_alloc_dma(mdev_device_t *mdev, struct iomem *iomem)
 {
 	void *tmp;
 	int ret;
@@ -301,13 +302,13 @@ int iomem_alloc_dma(int device, void **iomem_current,
 	memset(&dma_map, 0, sizeof(dma_map));
 	dma_map.argsz = sizeof(dma_map);
 	/* get a portion of the 4GB window created at init time */
-	tmp = mmap(*iomem_current, iomem->size, PROT_READ | PROT_WRITE,
+	tmp = mmap(mdev->iocur, iomem->size, PROT_READ | PROT_WRITE,
 		   MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1,
 		   0);
 	if (tmp == MAP_FAILED)
 		return -ENOMEM;
 
-	*iomem_current = (char *)*iomem_current + iomem->size;
+	mdev->iocur += iomem->size;
 
 	iomem->vaddr = tmp;
 
@@ -316,7 +317,7 @@ int iomem_alloc_dma(int device, void **iomem_current,
 	dma_map.flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE;
 
 	/* kernel driver fills dma_map.iova with the proper allocated IOVA */
-	ret = ioctl(device, VFIO_IOMMU_MAP_DMA, &dma_map);
+	ret = ioctl(mdev->device, VFIO_IOMMU_MAP_DMA, &dma_map);
 	if (ret < 0)
 		return -ENOMEM;
 	iomem->iova = dma_map.iova;
@@ -327,7 +328,7 @@ int iomem_alloc_dma(int device, void **iomem_current,
 	return 0;
 }
 
-int iomem_free_dma(int device, struct iomem *iomem)
+int iomem_free_dma(mdev_device_t *mdev, struct iomem *iomem)
 {
 	struct vfio_iommu_type1_dma_unmap dma_unmap;
 	int ret;
@@ -338,7 +339,7 @@ int iomem_free_dma(int device, struct iomem *iomem)
 	dma_unmap.size = iomem->size;
 	dma_unmap.flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE;
 
-	ret = ioctl(device, VFIO_IOMMU_UNMAP_DMA, &dma_unmap);
+	ret = ioctl(mdev->device, VFIO_IOMMU_UNMAP_DMA, &dma_unmap);
 	if (ret < 0) {
 		printf("iomem_free: unmap failed\n");
 		return -EFAULT;
@@ -357,9 +358,10 @@ int iomem_free_dma(int device, struct iomem *iomem)
  * Initialize VFIO variables.
  * set IOMMU and get device regions
  */
-int vfio_init_dev(int grp, int container, struct vfio_group_status *grp_status,
-		  struct vfio_iommu_type1_info *iommu_info,
-		  struct vfio_device_info *dev_info, char *grp_uuid)
+static int vfio_init_dev(int grp, int container,
+			 struct vfio_group_status *grp_status,
+			 struct vfio_iommu_type1_info *iommu_info,
+			 struct vfio_device_info *dev_info, char *grp_uuid)
 {
 	int ret;
 	int device = -1;
@@ -415,4 +417,60 @@ int vfio_init_dev(int grp, int container, struct vfio_group_status *grp_status,
 	       dev_info->num_regions, dev_info->num_irqs);
 out:
 	return device;
+}
+
+int mdev_device_create(mdev_device_t *mdev, const char *mod_name,
+		       const char *if_name)
+{
+	struct vfio_group_status group_status = {.argsz =
+		    sizeof(group_status) };
+	struct vfio_iommu_type1_info iommu_info = {.argsz =
+		    sizeof(iommu_info) };
+	struct vfio_device_info device_info = {.argsz = sizeof(device_info) };
+
+	memset(mdev, 0, sizeof(*mdev));
+	mdev->container = -1;
+	mdev->group = -1;
+
+	mdev->group_id =
+	    mdev_sysfs_discover(mod_name, if_name, mdev->group_uuid,
+				sizeof(mdev->group_uuid));
+	if (mdev->group_id < 0)
+		goto fail;
+
+	/* FIXME iobase and container(probably) has to be done globally and not per driver */
+	mdev->iobase = iomem_init();
+	if (!mdev->iobase)
+		goto fail;
+
+	mdev->iocur = mdev->iobase;
+
+	mdev->container = get_container();
+	if (mdev->container < 0)
+		goto fail;
+
+	mdev->group = get_group(mdev->group_id);
+	if (mdev->group < 0)
+		goto fail;
+
+	mdev->device =
+	    vfio_init_dev(mdev->group, mdev->container, &group_status,
+			  &iommu_info, &device_info, mdev->group_uuid);
+	if (mdev->device < 0)
+		goto fail;
+
+	return 0;
+
+fail:
+	return -1;
+}
+
+void mdev_device_destroy(mdev_device_t *mdev ODP_UNUSED)
+{
+	if (mdev->group != -1)
+		close(mdev->group);
+	if (mdev->container != -1)
+		close(mdev->container);
+	if (mdev->iobase)
+		iomem_free(mdev->iobase);
 }
