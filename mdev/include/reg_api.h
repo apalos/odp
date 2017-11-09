@@ -45,30 +45,22 @@ static inline void io_write64_relaxed(uint64_t value, volatile void *addr)
 
 static inline uint8_t io_read8(const volatile void *addr)
 {
-	uint8_t val;
-	val = io_read8_relaxed(addr);
-	return val;
+	return io_read8_relaxed(addr);
 }
 
 static inline uint16_t io_read16(const volatile void *addr)
 {
-	uint16_t val;
-	val = io_read16_relaxed(addr);
-	return val;
+	return io_read16_relaxed(addr);
 }
 
 static inline uint32_t io_read32(const volatile void *addr)
 {
-	uint32_t val;
-	val = io_read32_relaxed(addr);
-	return val;
+	return io_read32_relaxed(addr);
 }
 
 static inline uint64_t io_read64(const volatile void *addr)
 {
-	uint64_t val;
-	val = io_read64_relaxed(addr);
-	return val;
+	return io_read64_relaxed(addr);
 }
 
 static inline void io_write8(uint8_t value, volatile void *addr)

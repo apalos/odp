@@ -324,7 +324,7 @@ static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num)
 		uint32_t val = rxq->qhandle | (rxq->commit_pending / 8);
 
 		dma_wmb();
-		io_write32(odp_cpu_to_be_32(val), rxq->doorbell);
+		io_write32(odpdrv_cpu_to_be_32(val), rxq->doorbell);
 
 		rxq->commit_pending &= 7;
 	}

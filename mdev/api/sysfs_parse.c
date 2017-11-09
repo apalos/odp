@@ -8,16 +8,6 @@
 
 #include <sysfs_parse.h>
 
-static int mdev_check_path(const char *check_path)
-{
-	size_t len = strlen(check_path);
-	char path[len + 2];
-
-	snprintf(path, sizeof(path), "%s/", check_path);
-
-	return access(path, F_OK);
-}
-
 static char *mdev_basename(char *path)
 {
 	char *rpath;
@@ -32,9 +22,6 @@ static char *mdev_basename(char *path)
 static int mdev_readlink(const char *path, char *link, size_t linksz)
 {
 	ssize_t len;
-
-	if (mdev_check_path((const char *) path))
-		return -1;
 
 	len = readlink(path, link, linksz -1);
 	if (len != -1) {

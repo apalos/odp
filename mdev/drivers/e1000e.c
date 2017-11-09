@@ -117,7 +117,7 @@ typedef struct {
 	odp_pool_t pool;		/**< pool to alloc packets from */
 
 	/* volatile void *mmio; */
-	void *mmio;			/**< BAR0 mmap */
+	uint8_t *mmio;			/**< BAR0 mmap */
 
 	/* RX ring hot data */
 	odp_bool_t lockless_rx;		/**< no locking for RX */
@@ -327,7 +327,7 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 	dma_wmb();
 
 	io_write32(odpdrv_cpu_to_le_32(i),
-		   (char *)pkt_e1000e->mmio + E1000_RDT_OFFSET);
+		   pkt_e1000e->mmio + E1000_RDT_OFFSET);
 }
 
 static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
@@ -345,7 +345,7 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	 * Determine how many packets are available in RX ring:
 	 *     (Write_index - Read_index) modulo RX_ring_size
 	 */
-	budget += io_read32((char *)pkt_e1000e->mmio + E1000_RDH_OFFSET);
+	budget += io_read32(pkt_e1000e->mmio + E1000_RDH_OFFSET);
 	budget -= pkt_e1000e->rx_next;
 	budget &= E1000E_RX_RING_SIZE_DEFAULT - 1;
 
@@ -414,8 +414,8 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	budget = E1000E_TX_RING_SIZE_DEFAULT - 1;
 	budget -= pkt_e1000e->tx_next;
 	budget +=
-	    odp_le_to_cpu_32(io_read32
-			     ((char *)pkt_e1000e->mmio + E1000_TDH_OFFSET));
+	    odpdrv_le_to_cpu_32(io_read32
+			     (pkt_e1000e->mmio + E1000_TDH_OFFSET));
 	budget &= E1000E_TX_RING_SIZE_DEFAULT - 1;
 
 	if (budget > num)
@@ -438,9 +438,9 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 				       pkt_e1000e->tx_data.vaddr + offset);
 
 		tx_desc->buffer_addr =
-		    odp_cpu_to_le_64(pkt_e1000e->tx_data.iova + offset);
-		tx_desc->lower.data = odp_cpu_to_le_32(txd_cmd | pkt_len);
-		tx_desc->upper.data = odp_cpu_to_le_32(0);
+		    odpdrv_cpu_to_le_64(pkt_e1000e->tx_data.iova + offset);
+		tx_desc->lower.data = odpdrv_cpu_to_le_32(txd_cmd | pkt_len);
+		tx_desc->upper.data = odpdrv_cpu_to_le_32(0);
 
 		pkt_e1000e->tx_next++;
 		if (odp_unlikely(pkt_e1000e->tx_next >= E1000E_TX_RING_SIZE_DEFAULT))
@@ -452,8 +452,8 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 
 	dma_wmb();
 
-	io_write32(odp_cpu_to_le_32(pkt_e1000e->tx_next),
-		   (char *)pkt_e1000e->mmio + E1000_TDT_OFFSET);
+	io_write32(odpdrv_cpu_to_le_32(pkt_e1000e->tx_next),
+		   pkt_e1000e->mmio + E1000_TDT_OFFSET);
 
 	if (!pkt_e1000e->lockless_tx)
 		odp_ticketlock_unlock(&pkt_e1000e->tx_lock);

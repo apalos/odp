@@ -22,7 +22,7 @@ static const char *vfio_fail_str[] = {
 	[VFIO_CHECK_EXTENSION] = "Doesn't support the IOMMU driver we want",
 	[VFIO_GROUP_GET_STATUS] = "Can't get status",
 	[VFIO_GROUP_SET_CONTAINER] = "Failed to set container",
-	[VFIO_SET_IOMMU] "Failed to set IOMMU",
+	[VFIO_SET_IOMMU] = "Failed to set IOMMU",
 	[VFIO_IOMMU_GET_INFO] = "Failed to get IOMMU info",
 	[VFIO_GROUP_GET_DEVICE_FD] = "Failed to get device FD",
 	[VFIO_DEVICE_GET_INFO] = "Failed to get device info",
