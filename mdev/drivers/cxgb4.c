@@ -30,6 +30,8 @@
 
 #include <uapi/net_mdev.h>
 
+#define MODULE_NAME "cxgb4"
+
 /* Common code. TODO: relocate */
 #if 1
 #define barrier() __asm__ __volatile__("": : :"memory")
@@ -129,18 +131,15 @@ typedef struct {
 	void *mmio;			/**< BAR0 mmap */
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
 
-	char ifname[IFNAMSIZ + 1];	/**< Interface name */
+	char if_name[IF_NAMESIZE];	/**< Interface name */
 } pktio_ops_cxgb4_data_t;
 
-static pktio_ops_module_t cxgb4_pktio_ops;
-
 static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num);
-
 static void cxgb4_wait_link_up(pktio_entry_t *pktio_entry);
 
 static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 		       pktio_entry_t * pktio_entry,
-		       const char *netdev, odp_pool_t pool)
+		       const char *resource, odp_pool_t pool)
 {
 	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
 	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
@@ -152,24 +151,26 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 	int group_id;
 	uint32_t i;
 
-	printf("%s: probing %s\n", __func__, netdev);
+	// ODP_ASSERT(pool != ODP_POOL_INVALID);
+
+	if (strncmp(resource, NET_MDEV_PREFIX, strlen(NET_MDEV_PREFIX)))
+		return -1;
 
 	/* Init pktio entry */
 	memset(pkt_cxgb4, 0, sizeof(*pkt_cxgb4));
-	memset(group_uuid, 0, sizeof(group_uuid));
+	strncpy(pkt_cxgb4->if_name, resource + strlen(NET_MDEV_PREFIX),
+		sizeof(pkt_cxgb4->if_name - 1));
 
-	if (pool == ODP_POOL_INVALID)
-		return -EINVAL;
+	printf("%s: open %s\n", MODULE_NAME, pkt_cxgb4->if_name);
 
 	pkt_cxgb4->pool = pool;
 
+	memset(group_uuid, 0, sizeof(group_uuid));
 	group_id =
-	    mdev_sysfs_discover(netdev, cxgb4_pktio_ops.base.name, group_uuid,
+	    mdev_sysfs_discover(MODULE_NAME, pkt_cxgb4->if_name, group_uuid,
 				sizeof(group_uuid));
 	if (group_id < 0)
 		return -EINVAL;
-
-	strncpy(pkt_cxgb4->ifname, netdev + strlen(NET_MDEV_MATCH), IFNAMSIZ);
 
 	for (i = 0; i < ARRAY_SIZE(pkt_cxgb4->rx_locks); i++)
 		odp_ticketlock_init(&pkt_cxgb4->rx_locks[i]);
@@ -284,6 +285,8 @@ out:
 static int cxgb4_close(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
+
+	printf("%s: close %s\n", MODULE_NAME, pkt_cxgb4->if_name);
 
 	if (pkt_cxgb4->group > 0)
 		close(pkt_cxgb4->group);
@@ -457,7 +460,7 @@ static int cxgb4_link_status(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
 
-	return mdev_get_iff_link(pkt_cxgb4->ifname);
+	return mdev_get_iff_link(pkt_cxgb4->if_name);
 }
 
 /* TODO: move to common code */
@@ -470,7 +473,7 @@ static void cxgb4_wait_link_up(pktio_entry_t *pktio_entry)
 
 static pktio_ops_module_t cxgb4_pktio_ops = {
 	.base = {
-		 .name = "cxgb4",
+		 .name = MODULE_NAME,
 	},
 
 	.open = cxgb4_open,

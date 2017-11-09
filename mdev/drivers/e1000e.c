@@ -34,6 +34,8 @@
 
 #include <uapi/net_mdev.h>
 
+#define MODULE_NAME "e1000e"
+
 /* Common code. TODO: relocate */
 #if 1
 #define barrier() __asm__ __volatile__("": : :"memory")
@@ -144,7 +146,7 @@ typedef struct {
 	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
 	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
 
-	char ifname[IFNAMSIZ + 1];	/**< Interface name */
+	char if_name[IF_NAMESIZE];	/**< Interface name */
 } pktio_ops_e1000e_data_t;
 
 static pktio_ops_module_t e1000e_pktio_ops;
@@ -156,7 +158,7 @@ static void e1000e_wait_link_up(pktio_entry_t *pktio_entry);
 
 static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 		       pktio_entry_t * pktio_entry,
-		       const char *netdev, odp_pool_t pool)
+		       const char *resource, odp_pool_t pool)
 {
 	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
 	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
@@ -168,24 +170,26 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	char group_uuid[64]; /* 37 should be enough */
 	int group_id;
 
-	printf("%s: probing %s\n", __func__, netdev);
+	// ODP_ASSERT(pool != ODP_POOL_INVALID);
+
+	if (strncmp(resource, NET_MDEV_PREFIX, strlen(NET_MDEV_PREFIX)))
+		return -1;
 
 	/* Init pktio entry */
 	memset(pkt_e1000e, 0, sizeof(*pkt_e1000e));
-	memset(group_uuid, 0, sizeof(group_uuid));
+	strncpy(pkt_e1000e->if_name, resource + strlen(NET_MDEV_PREFIX),
+		sizeof(pkt_e1000e->if_name) - 1);
 
-	if (pool == ODP_POOL_INVALID)
-		return -EINVAL;
+	printf("%s: open %s\n", MODULE_NAME, pkt_e1000e->if_name);
 
 	pkt_e1000e->pool = pool;
 
+	memset(group_uuid, 0, sizeof(group_uuid));
 	group_id =
-	    mdev_sysfs_discover(netdev, e1000e_pktio_ops.base.name, group_uuid,
+	    mdev_sysfs_discover(MODULE_NAME, pkt_e1000e->if_name, group_uuid,
 				sizeof(group_uuid));
 	if (group_id < 0)
 		return -EINVAL;
-
-	strncpy(pkt_e1000e->ifname, netdev + strlen(NET_MDEV_MATCH), IFNAMSIZ);
 
 	pkt_e1000e->capa.max_input_queues = 1;
 	pkt_e1000e->capa.max_output_queues = 1;
@@ -284,6 +288,8 @@ out:
 static int e1000e_close(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
+
+	printf("%s: close %s\n", MODULE_NAME, pkt_e1000e->if_name);
 
 	if (pkt_e1000e->group > 0)
 		close(pkt_e1000e->group);
@@ -472,7 +478,7 @@ static int e1000e_link_status(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
 
-	return mdev_get_iff_link(pkt_e1000e->ifname);
+	return mdev_get_iff_link(pkt_e1000e->if_name);
 }
 
 /* TODO: move to common code */
@@ -485,7 +491,7 @@ static void e1000e_wait_link_up(pktio_entry_t *pktio_entry)
 
 static pktio_ops_module_t e1000e_pktio_ops = {
 	.base = {
-		 .name = "e1000e",
+		 .name = MODULE_NAME,
 	},
 
 	.open = e1000e_open,

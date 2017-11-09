@@ -31,38 +31,21 @@ static int mdev_readlink(const char *path, char *link, size_t linksz)
 	return -1;
 }
 
-static int mdev_get_names(const char *netdev, char *driver, size_t sz)
-{
-	if (strncmp(netdev, NET_MDEV_MATCH, strlen(NET_MDEV_MATCH)))
-		return -1;
-
-	strncpy(driver, netdev + strlen(NET_MDEV_MATCH), sz);
-
-	return 0;
-}
-
 /**
  * returns group_id or -1 on fail and fills group_uuid
  */
-int mdev_sysfs_discover(const char *netdev, const char *mod_name, char *uuid,
+int mdev_sysfs_discover(const char *mod_name, const char *if_name, char *uuid,
 			size_t sz)
 {
 	int ret;
-	char ifname[64];
 	char *driver, *iommu_group;
 	char sysfs_path[2048], sysfs_link[2048];
 	DIR *dir;
 	struct dirent *dp;
 
-	memset(ifname, 0, sizeof(ifname));
-
-	ret = mdev_get_names(netdev, ifname, sizeof(ifname));
-	if (ret)
-		return -1;
-
 	/* Don't put / on the end of the path */
 	snprintf(sysfs_path, sizeof(sysfs_path), "/sys/class/net/%s/device/driver",
-		 ifname);
+		 if_name);
 	ret = mdev_readlink(sysfs_path, sysfs_link, sizeof(sysfs_link));
 	if (ret) {
 		printf("Can't locate sysfs driver path\n");
@@ -81,7 +64,7 @@ int mdev_sysfs_discover(const char *netdev, const char *mod_name, char *uuid,
 	}
 
 	snprintf(sysfs_path, sizeof(sysfs_path), "/sys/class/net/%s/device/mdev_supported_types/%s-netmdev/devices/",
-		 ifname, driver);
+		 if_name, driver);
 	dir = opendir(sysfs_path);
 	if (!dir)
 		return -1;

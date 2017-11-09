@@ -26,6 +26,8 @@
 
 #include <uapi/net_mdev.h>
 
+#define MODULE_NAME "r8169"
+
 /* Common code. TODO: relocate */
 #if 1
 typedef unsigned long dma_addr_t;
@@ -61,10 +63,8 @@ typedef struct {
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
 	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
 	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
-	char ifname[IFNAMSIZ + 1];	/** Interface name */
+	char if_name[IF_NAMESIZE];	/** Interface name */
 } pktio_ops_r8169_data_t;
-
-static pktio_ops_module_t r8169_pktio_ops;
 
 static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 			    uint16_t from, uint16_t num);
@@ -184,7 +184,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 }
 
 static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
-		      const char *netdev, odp_pool_t pool)
+		      const char *resource, odp_pool_t pool)
 {
 	struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
 	struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
@@ -196,24 +196,26 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	char group_uuid[64]; /* 37 should be enough */
 	int group_id;
 
-	printf("%s: probing %s\n", __func__, netdev);
+	// ODP_ASSERT(pool != ODP_POOL_INVALID);
+
+	if (strncmp(resource, NET_MDEV_PREFIX, strlen(NET_MDEV_PREFIX)))
+		return -1;
 
 	/* Init pktio entry */
 	memset(pkt_r8169, 0, sizeof(*pkt_r8169));
-	memset(group_uuid, 0, sizeof(group_uuid));
+	strncpy(pkt_r8169->if_name, resource + strlen(NET_MDEV_PREFIX),
+		sizeof(pkt_r8169->if_name) - 1);
 
-	if (pool == ODP_POOL_INVALID)
-		return -EINVAL;
+	printf("%s: open %s\n", MODULE_NAME, pkt_r8169->if_name);
 
 	pkt_r8169->pool = pool;
 
+	memset(group_uuid, 0, sizeof(group_uuid));
 	group_id =
-	    mdev_sysfs_discover(netdev, r8169_pktio_ops.base.name, group_uuid,
+	    mdev_sysfs_discover(MODULE_NAME, pkt_r8169->if_name, group_uuid,
 				sizeof(group_uuid));
 	if (group_id < 0)
 		return -EINVAL;
-
-	strncpy(pkt_r8169->ifname, netdev + strlen(NET_MDEV_MATCH), IFNAMSIZ);
 
 	pkt_r8169->capa.max_input_queues = 1;
 	pkt_r8169->capa.max_output_queues = 1;
@@ -311,6 +313,8 @@ out:
 static int r8169_close(pktio_entry_t * pktio_entry)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
+
+	printf("%s: close %s\n", MODULE_NAME, pkt_r8169->if_name);
 
 	if (pkt_r8169->group > 0)
 		close(pkt_r8169->group);
@@ -426,7 +430,7 @@ static int r8169_link_status(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 
-	return mdev_get_iff_link(pkt_r8169->ifname);
+	return mdev_get_iff_link(pkt_r8169->if_name);
 }
 
 /* TODO: move to common code */
@@ -439,7 +443,7 @@ static void r8169_wait_link_up(pktio_entry_t *pktio_entry)
 
 static pktio_ops_module_t r8169_pktio_ops = {
 	.base = {
-		 .name = "r8169",
+		 .name = MODULE_NAME,
 	},
 
 	.open = r8169_open,
