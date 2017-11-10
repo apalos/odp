@@ -162,7 +162,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
 	int ret;
 
-	// ODP_ASSERT(pool != ODP_POOL_INVALID);
+	ODP_ASSERT(pool != ODP_POOL_INVALID);
 
 	if (strncmp(resource, NET_MDEV_PREFIX, strlen(NET_MDEV_PREFIX)))
 		return -1;
@@ -263,7 +263,7 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 	uint16_t i = from;
 
 	/* Need 1 desc gap to keep tail from touching head */
-	// TODO: ODP_ASSERT(num < E1000E_RX_RING_SIZE_DEFAULT);
+	ODP_ASSERT(num < E1000E_RX_RING_SIZE_DEFAULT);
 
 	while (num) {
 		e1000e_rx_desc_t *rx_desc = &pkt_e1000e->rx_ring[i];

@@ -187,7 +187,7 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 	int ret;
 
-	// ODP_ASSERT(pool != ODP_POOL_INVALID);
+	ODP_ASSERT(pool != ODP_POOL_INVALID);
 
 	if (strncmp(resource, NET_MDEV_PREFIX, strlen(NET_MDEV_PREFIX)))
 		return -1;
@@ -286,7 +286,7 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 {
 	uint16_t i = from;
 
-	// TODO: ODP_ASSERT(num <= NUM_RX_DESC);
+	ODP_ASSERT(num <= NUM_RX_DESC);
 
 	while (num) {
 		struct r8169_rxdesc *rx_desc = &pkt_r8169->rx_ring[i];
@@ -337,7 +337,7 @@ static int r8169_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		dma_rmb();
 
 		/* FIXME: let the HW drop all erroneous packets */
-		// TODO: ODP_ASSERT(status & RxRES);
+		ODP_ASSERT(status & RxRES);
 
 		/* FIXME: don't include FCS */
 		/* FIXME: use proper macro to mask packet length from status */

@@ -144,7 +144,7 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
 	int ret;
 
-	// ODP_ASSERT(pool != ODP_POOL_INVALID);
+	ODP_ASSERT(pool != ODP_POOL_INVALID);
 
 	if (strncmp(resource, NET_MDEV_PREFIX, strlen(NET_MDEV_PREFIX)))
 		return -1;

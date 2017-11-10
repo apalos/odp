@@ -79,7 +79,9 @@ enum init_stage {
 	ALL_INIT      /* All init stages completed */
 };
 
+#include <odp/visibility_begin.h>
 extern struct odp_global_data_s odp_global_data;
+#include <odp/visibility_end.h>
 
 int _odp_term_global(enum init_stage stage);
 int _odp_term_local(enum init_stage stage);
