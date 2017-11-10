@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include <config.h>
 #include <odp_posix_extensions.h>
 #include <odp/api/hints.h>
 
@@ -18,6 +19,8 @@
 #include <uapi/net_mdev.h>
 #include <vfio_api.h>
 #include <sysfs_parse.h>
+
+#include <odp_debug_internal.h>
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 static const char *vfio_fail_str[] = {
@@ -42,9 +45,9 @@ static const struct cap_to_type_subtype {
 static void vfio_print_fail(unsigned int reason)
 {
 	if (reason > ARRAY_SIZE(vfio_fail_str))
-		printf("Unknown\n");
+		ODP_ERR("Unknown\n");
 	else
-		printf("%s\n", vfio_fail_str[reason]);
+		ODP_ERR("%s\n", vfio_fail_str[reason]);
 }
 
 /**
@@ -63,12 +66,12 @@ static int get_container(void)
 
 	ret = ioctl(container, VFIO_GET_API_VERSION);
 	if (ret != VFIO_API_VERSION) {
-		printf("Unknown API version\n");
+		ODP_ERR("Unknown API version\n");
 		goto out;
 	}
 
 	if (!ioctl(container, VFIO_CHECK_EXTENSION, VFIO_TYPE1_IOMMU)) {
-		printf("Doesn't support the IOMMU driver we want\n");
+		ODP_ERR("Doesn't support the IOMMU driver we want\n");
 		goto out;
 	}
 
@@ -94,7 +97,7 @@ static int get_group(int grp_id)
 	snprintf(path, sizeof(path), "/dev/vfio/%d", grp_id);
 	group = open(path, O_RDWR);
 	if (group < 0) {
-		printf("Failed to open %s, %d (%s)\n",
+		ODP_ERR("Failed to open %s, %d (%s)\n",
 		       path, group, strerror(errno));
 		return group;
 	}
@@ -102,13 +105,13 @@ static int get_group(int grp_id)
 	ret = ioctl(group, VFIO_GROUP_GET_STATUS, &group_status);
 
 	if (ret < 0) {
-		printf("ioctl(VFIO_GROUP_GET_STATUS) failed\n");
+		ODP_ERR("ioctl(VFIO_GROUP_GET_STATUS) failed\n");
 		goto out;
 	}
 
 	/* Test the group is viable and available */
 	if (!(group_status.flags & VFIO_GROUP_FLAGS_VIABLE)) {
-		printf("Group is not viable\n");
+		ODP_ERR("Group is not viable\n");
 		goto out;
 	}
 
@@ -183,7 +186,7 @@ static int vfio_get_region_sparse_mmaps(int device, struct vfio_region_info *reg
 			ret = -ENODEV;
 		ret = vfio_find_sparse_mmaps(caps, &sparse);
 		for (i = 0; i < sparse->nr_areas; i++)
-			printf("Sparse region: %d 0x%llx %llu\n", i,
+			ODP_DBG("Sparse region: %d 0x%llx %llu\n", i,
 			       sparse->areas[i].offset, sparse->areas[i].size);
 	}
 
@@ -233,14 +236,14 @@ static int vfio_get_region(mdev_device_t * mdev,
 
 	region_info->index = region;
 	ret = ioctl(mdev->device, VFIO_DEVICE_GET_REGION_INFO, region_info);
-	printf("Region:%d ", region);
+	ODP_DBG("Region:%d ", region);
 	if (ret < 0) {
 		vfio_print_fail(VFIO_DEVICE_GET_REGION_INFO);
 		return ret;
 	}
 
 	if (!region_info->size) {
-		printf("unimplemented PCI BAR\n");
+		ODP_ERR("unimplemented PCI BAR\n");
 		return -EINVAL;
 	}
 	/*  FIXME call proper function and id, Rx/Tx descriptors are types
@@ -268,7 +271,7 @@ void *vfio_mmap_region(mdev_device_t *mdev, __u32 region, size_t *len)
 	if (!region_info.size || ret)
 		return NULL;
 
-	printf("region:%d size %lu, offset 0x%lx, flags 0x%x\n", region,
+	ODP_DBG("region:%d size %lu, offset 0x%lx, flags 0x%x\n", region,
 	       (unsigned long)region_info.size,
 	       (unsigned long)region_info.offset, region_info.flags);
 	if (!(region_info.flags & VFIO_REGION_INFO_FLAG_MMAP))
@@ -277,7 +280,7 @@ void *vfio_mmap_region(mdev_device_t *mdev, __u32 region, size_t *len)
 	mapped = mmap(NULL, region_info.size, PROT_READ | PROT_WRITE,
 		      MAP_SHARED, mdev->device, region_info.offset);
 	if (mapped == MAP_FAILED) {
-		printf("mmap failed\n");
+		ODP_ERR("mmap failed\n");
 		return NULL;
 	}
 	*len = region_info.size;
@@ -322,7 +325,7 @@ int iomem_alloc_dma(mdev_device_t *mdev, struct iomem *iomem)
 		return -ENOMEM;
 	iomem->iova = dma_map.iova;
 
-	printf("iomem_alloc: VA(%p) -> physmem(%lluKB) <- IOVA(%llx)\n",
+	ODP_DBG("iomem_alloc: VA(%p) -> physmem(%lluKB) <- IOVA(%llx)\n",
 	       iomem->vaddr, iomem->size / 1024, iomem->iova);
 
 	return 0;
@@ -341,13 +344,13 @@ int iomem_free_dma(mdev_device_t *mdev, struct iomem *iomem)
 
 	ret = ioctl(mdev->device, VFIO_IOMMU_UNMAP_DMA, &dma_unmap);
 	if (ret < 0) {
-		printf("iomem_free: unmap failed\n");
+		ODP_ERR("iomem_free: unmap failed\n");
 		return -EFAULT;
 	}
 
 	ret = munmap(iomem->vaddr, iomem->size);
 	if (ret) {
-		printf("munmap failed\n");
+		ODP_ERR("munmap failed\n");
 		return -EFAULT;
 	}
 
@@ -398,7 +401,7 @@ static int vfio_init_dev(int grp, int container,
 		goto out;
 	}
 
-	printf("iova_pgsizes bitmask=0x%llx\n", iommu_info->iova_pgsizes);
+	ODP_DBG("iova_pgsizes bitmask=0x%llx\n", iommu_info->iova_pgsizes);
 	/* Get a file descriptor for the device */
 	device = ioctl(grp, VFIO_GROUP_GET_DEVICE_FD, grp_uuid);
 	if (device < 0) {
@@ -413,7 +416,7 @@ static int vfio_init_dev(int grp, int container,
 		goto out;
 	}
 
-	printf("Device %d Regions: %d, irqs:%d\n", device,
+	ODP_DBG("Device %d Regions: %d, irqs:%d\n", device,
 	       dev_info->num_regions, dev_info->num_irqs);
 out:
 	return device;

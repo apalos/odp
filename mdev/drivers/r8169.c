@@ -197,7 +197,7 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	strncpy(pkt_r8169->if_name, resource + strlen(NET_MDEV_PREFIX),
 		sizeof(pkt_r8169->if_name) - 1);
 
-	printf("%s: open %s\n", MODULE_NAME, pkt_r8169->if_name);
+	ODP_DBG("%s: open %s\n", MODULE_NAME, pkt_r8169->if_name);
 
 	ret = mdev_device_create(&pkt_r8169->mdev, MODULE_NAME, pkt_r8169->if_name);
 	if (ret)
@@ -213,7 +213,7 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 
 	pkt_r8169->mmio = vfio_mmap_region(&pkt_r8169->mdev, 2, &pkt_r8169->mmio_len);
 	if (!pkt_r8169->mmio) {
-		printf("Cannot map MMIO\n");
+		ODP_ERR("Cannot map MMIO\n");
 		goto out;
 	}
 
@@ -221,14 +221,14 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 					      VFIO_NET_MDEV_RX_REGION_INDEX,
 					      &pkt_r8169->rx_ring_len);
 	if (!pkt_r8169->rx_ring) {
-		printf("Cannot map RxRing\n");
+		ODP_ERR("Cannot map RxRing\n");
 		goto out;
 	}
 	pkt_r8169->tx_ring = vfio_mmap_region(&pkt_r8169->mdev, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_TX_REGION_INDEX,
 					      &pkt_r8169->tx_ring_len);
 	if (!pkt_r8169->tx_ring) {
-		printf("Cannot map TxRing\n");
+		ODP_ERR("Cannot map TxRing\n");
 		goto out;
 	}
 
@@ -249,7 +249,7 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 
 	r8169_wait_link_up(pktio_entry);
 
-	printf("%s: open %s is successful\n", MODULE_NAME, pkt_r8169->if_name);
+	ODP_DBG("%s: open %s is successful\n", MODULE_NAME, pkt_r8169->if_name);
 
 	return 0;
 
@@ -263,7 +263,7 @@ static int r8169_close(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 
-	printf("%s: close %s\n", MODULE_NAME, pkt_r8169->if_name);
+	ODP_DBG("%s: close %s\n", MODULE_NAME, pkt_r8169->if_name);
 
 	mdev_device_destroy(&pkt_r8169->mdev);
 

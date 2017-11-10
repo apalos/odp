@@ -154,7 +154,7 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 	strncpy(pkt_cxgb4->if_name, resource + strlen(NET_MDEV_PREFIX),
 		sizeof(pkt_cxgb4->if_name - 1));
 
-	printf("%s: open %s\n", MODULE_NAME, pkt_cxgb4->if_name);
+	ODP_DBG("%s: open %s\n", MODULE_NAME, pkt_cxgb4->if_name);
 
 	ret = mdev_device_create(&pkt_cxgb4->mdev, MODULE_NAME, pkt_cxgb4->if_name);
 	if (ret)
@@ -179,7 +179,7 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 
 	cxgb4_wait_link_up(pktio_entry);
 
-	printf("%s: open %s is successful\n", MODULE_NAME, pkt_cxgb4->if_name);
+	ODP_DBG("%s: open %s is successful\n", MODULE_NAME, pkt_cxgb4->if_name);
 
 	return 0;
 
@@ -194,7 +194,7 @@ static int cxgb4_close(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
 
-	printf("%s: close %s\n", MODULE_NAME, pkt_cxgb4->if_name);
+	ODP_DBG("%s: close %s\n", MODULE_NAME, pkt_cxgb4->if_name);
 
 	mdev_device_destroy(&pkt_cxgb4->mdev);
 
@@ -255,8 +255,7 @@ static int cxgb4_recv(pktio_entry_t * pktio_entry,
 		type = RX_DESC_TO_TYPE(rxd);
 
 		if (odp_unlikely(type != RX_DESC_TYPE_FLBUF_X)) {
-			// ODP_ERR("Invalid rxd type %u\n", type);
-			printf("Invalid rxd type %u, skipping\n", type);
+			ODP_ERR("Invalid rxd type %u\n", type);
 
 			rxq->rx_next++;
 			if (odp_unlikely(rxq->rx_next >= rxq->rx_queue_len))

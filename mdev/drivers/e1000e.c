@@ -172,7 +172,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	strncpy(pkt_e1000e->if_name, resource + strlen(NET_MDEV_PREFIX),
 		sizeof(pkt_e1000e->if_name) - 1);
 
-	printf("%s: open %s\n", MODULE_NAME, pkt_e1000e->if_name);
+	ODP_DBG("%s: open %s\n", MODULE_NAME, pkt_e1000e->if_name);
 
 	ret = mdev_device_create(&pkt_e1000e->mdev, MODULE_NAME, pkt_e1000e->if_name);
 	if (ret)
@@ -189,7 +189,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	/* Init device and mmaps */
 	pkt_e1000e->mmio = vfio_mmap_region(&pkt_e1000e->mdev, 0, &pkt_e1000e->mmio_len);
 	if (!pkt_e1000e->mmio) {
-		printf("Cannot map MMIO\n");
+		ODP_ERR("Cannot map MMIO\n");
 		goto out;
 	}
 
@@ -197,14 +197,14 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 					      VFIO_NET_MDEV_RX_REGION_INDEX,
 					      &pkt_e1000e->rx_ring_len);
 	if (!pkt_e1000e->rx_ring) {
-		printf("Cannot map RxRing\n");
+		ODP_ERR("Cannot map RxRing\n");
 		goto out;
 	}
 	pkt_e1000e->tx_ring = vfio_mmap_region(&pkt_e1000e->mdev, VFIO_PCI_NUM_REGIONS +
 					      VFIO_NET_MDEV_TX_REGION_INDEX,
 					      &pkt_e1000e->tx_ring_len);
 	if (!pkt_e1000e->tx_ring) {
-		printf("Cannot map TxRing\n");
+		ODP_ERR("Cannot map TxRing\n");
 		goto out;
 	}
 
@@ -225,7 +225,7 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	e1000e_wait_link_up(pktio_entry);
 
-	printf("%s: open %s is successful\n", MODULE_NAME, pkt_e1000e->if_name);
+	ODP_DBG("%s: open %s is successful\n", MODULE_NAME, pkt_e1000e->if_name);
 
 	return 0;
 
@@ -239,7 +239,7 @@ static int e1000e_close(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
 
-	printf("%s: close %s\n", MODULE_NAME, pkt_e1000e->if_name);
+	ODP_DBG("%s: close %s\n", MODULE_NAME, pkt_e1000e->if_name);
 
 	mdev_device_destroy(&pkt_e1000e->mdev);
 

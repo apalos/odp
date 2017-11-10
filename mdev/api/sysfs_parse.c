@@ -6,6 +6,9 @@
 #include <dirent.h>
 #include <stdlib.h>
 
+#include <config.h>
+#include <odp_debug_internal.h>
+
 #include <sysfs_parse.h>
 
 static char *mdev_basename(char *path)
@@ -48,18 +51,18 @@ int mdev_sysfs_discover(const char *mod_name, const char *if_name, char *uuid,
 		 if_name);
 	ret = mdev_readlink(sysfs_path, sysfs_link, sizeof(sysfs_link));
 	if (ret) {
-		printf("Can't locate sysfs driver path\n");
+		ODP_ERR("Can't locate sysfs driver path\n");
 		return -1;
 	}
 
 	driver = mdev_basename(sysfs_link);
 	if (!driver) {
-		printf("Can't driver in sysfs\n");
+		ODP_ERR("Can't driver in sysfs\n");
 		return -1;
 	}
 
 	if (strcmp(driver, mod_name)) {
-		printf("Invalid driver name\n");
+		ODP_ERR("Invalid driver name\n");
 		return -1;
 	}
 
@@ -84,13 +87,13 @@ int mdev_sysfs_discover(const char *mod_name, const char *if_name, char *uuid,
 		 uuid);
 	ret = mdev_readlink(sysfs_path, sysfs_link, sizeof(sysfs_link));
 	if (ret) {
-		printf("Can't locate IOMMU sysfs path\n");
+		ODP_ERR("Can't locate IOMMU sysfs path\n");
 		return -1;
 	}
 
 	iommu_group = mdev_basename(sysfs_link);
 	if (!iommu_group) {
-		printf("Can't locate iommu group in sysfs\n");
+		ODP_ERR("Can't locate iommu group in sysfs\n");
 		return -1;
 	}
 	ret = atoi(iommu_group);
