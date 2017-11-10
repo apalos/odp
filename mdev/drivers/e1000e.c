@@ -31,6 +31,7 @@
 #include <vfio_api.h>
 #include <sysfs_parse.h>
 #include <eth_stats.h>
+#include <common.h>
 
 #include <uapi/net_mdev.h>
 
@@ -155,6 +156,121 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 static void e1000e_wait_link_up(pktio_entry_t *pktio_entry);
 static int e1000e_close(pktio_entry_t *pktio_entry);
 
+static int e1000e_mmio_register(pktio_ops_e1000e_data_t *pkt_e1000e,
+				uint64_t offset, uint64_t size)
+{
+	ODP_ASSERT(pkt_e1000e->mmio == NULL);
+
+	pkt_e1000e->mmio = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
+	if (pkt_e1000e->mmio == MAP_FAILED) {
+		ODP_ERR("Cannot mmap MMIO\n");
+		return -1;
+	}
+
+	pkt_e1000e->mmio_len = size;
+
+	ODP_DBG("Register MMIO region: 0x%llx@%016llx\n", size, offset);
+
+	return 0;
+}
+
+static int e1000e_rx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
+				    uint64_t offset, uint64_t size)
+{
+	int ret;
+
+	ODP_ASSERT(pkt_e1000e->capa.max_input_queues == 0);
+
+	pkt_e1000e->rx_ring = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
+	if (pkt_e1000e->rx_ring == MAP_FAILED) {
+		ODP_ERR("Cannot mmap RX queue\n");
+		return -1;
+	}
+
+	pkt_e1000e->rx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(&pkt_e1000e->mdev, &pkt_e1000e->rx_data);
+	if (ret) {
+		ODP_ERR("Cannot allocate RX queue DMA area\n");
+		return -1;
+	}
+
+	e1000e_rx_refill(pkt_e1000e, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
+
+	pkt_e1000e->rx_ring_len = size;
+	pkt_e1000e->capa.max_input_queues++;
+
+	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
+
+	return 0;
+}
+
+static int e1000e_tx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
+				    uint64_t offset, uint64_t size)
+{
+	int ret;
+
+	ODP_ASSERT(pkt_e1000e->capa.max_output_queues == 0);
+
+	pkt_e1000e->tx_ring = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
+	if (pkt_e1000e->tx_ring == MAP_FAILED) {
+		ODP_ERR("Cannot mmap TX queue\n");
+		return -1;
+	}
+
+	pkt_e1000e->tx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(&pkt_e1000e->mdev, &pkt_e1000e->tx_data);
+	if (ret) {
+		ODP_ERR("Cannot allocate TX queue DMA area\n");
+		return -1;
+	}
+
+	pkt_e1000e->tx_ring_len = size;
+	pkt_e1000e->capa.max_output_queues++;
+
+	ODP_DBG("Register TX queue region: 0x%llx@%016llx\n", size, offset);
+
+	return 0;
+}
+
+static int e1000e_region_info_cb(mdev_device_t *mdev,
+				 struct vfio_region_info *region_info)
+{
+	pktio_ops_e1000e_data_t *pkt_e1000e =
+	    odp_container_of(mdev, pktio_ops_e1000e_data_t, mdev);
+	int ret;
+
+	/*
+	 * TODO: parse region_info capabilities instead of hardcoded region
+	 * index and call relevant hook
+	 */
+	switch (region_info->index) {
+	case 0:
+		ret =
+		    e1000e_mmio_register(pkt_e1000e, region_info->offset,
+					 region_info->size);
+		break;
+
+	case VFIO_PCI_NUM_REGIONS + VFIO_NET_MDEV_RX_REGION_INDEX:
+		ret =
+		    e1000e_rx_queue_register(pkt_e1000e, region_info->offset,
+					     region_info->size);
+		break;
+
+	case VFIO_PCI_NUM_REGIONS + VFIO_NET_MDEV_TX_REGION_INDEX:
+		ret =
+		    e1000e_tx_queue_register(pkt_e1000e, region_info->offset,
+					     region_info->size);
+		break;
+
+	default:
+		ODP_ERR("Unexpected region %u\n", region_info->index);
+		ret = -1;
+		break;
+	}
+
+	return ret;
+}
+
 static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 		       pktio_entry_t * pktio_entry,
 		       const char *resource, odp_pool_t pool)
@@ -174,54 +290,16 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	ODP_DBG("%s: open %s\n", MODULE_NAME, pkt_e1000e->if_name);
 
-	ret = mdev_device_create(&pkt_e1000e->mdev, MODULE_NAME, pkt_e1000e->if_name);
+	ret =
+	    mdev_device_create(&pkt_e1000e->mdev, MODULE_NAME,
+			       pkt_e1000e->if_name, e1000e_region_info_cb);
 	if (ret)
 		goto out;
 
 	pkt_e1000e->pool = pool;
 
-	pkt_e1000e->capa.max_input_queues = 1;
-	pkt_e1000e->capa.max_output_queues = 1;
-
 	odp_ticketlock_init(&pkt_e1000e->rx_lock);
 	odp_ticketlock_init(&pkt_e1000e->tx_lock);
-
-	/* Init device and mmaps */
-	pkt_e1000e->mmio = vfio_mmap_region(&pkt_e1000e->mdev, 0, &pkt_e1000e->mmio_len);
-	if (!pkt_e1000e->mmio) {
-		ODP_ERR("Cannot map MMIO\n");
-		goto out;
-	}
-
-	pkt_e1000e->rx_ring = vfio_mmap_region(&pkt_e1000e->mdev, VFIO_PCI_NUM_REGIONS +
-					      VFIO_NET_MDEV_RX_REGION_INDEX,
-					      &pkt_e1000e->rx_ring_len);
-	if (!pkt_e1000e->rx_ring) {
-		ODP_ERR("Cannot map RxRing\n");
-		goto out;
-	}
-	pkt_e1000e->tx_ring = vfio_mmap_region(&pkt_e1000e->mdev, VFIO_PCI_NUM_REGIONS +
-					      VFIO_NET_MDEV_TX_REGION_INDEX,
-					      &pkt_e1000e->tx_ring_len);
-	if (!pkt_e1000e->tx_ring) {
-		ODP_ERR("Cannot map TxRing\n");
-		goto out;
-	}
-
-	/* FIXME decide on allocated areas per hardware instead of getting 2MB
-	 * per direction
-	 */
-	pkt_e1000e->rx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(&pkt_e1000e->mdev, &pkt_e1000e->rx_data);
-	if (ret)
-		goto out;
-
-	pkt_e1000e->tx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(&pkt_e1000e->mdev, &pkt_e1000e->tx_data);
-	if (ret)
-		goto out;
-
-	e1000e_rx_refill(pkt_e1000e, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
 
 	e1000e_wait_link_up(pktio_entry);
 

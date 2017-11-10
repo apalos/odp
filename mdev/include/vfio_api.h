@@ -14,10 +14,15 @@ typedef struct {
 	uint8_t *iocur;
 } mdev_device_t;
 
-int mdev_device_create(mdev_device_t *mdev, const char *mod_name, const char *if_name);
+typedef int (*mdev_region_info_cb_t)(mdev_device_t *,
+				     struct vfio_region_info *);
+
+int mdev_device_create(mdev_device_t * mdev, const char *mod_name,
+		       const char *if_name, mdev_region_info_cb_t cb);
 void mdev_device_destroy(mdev_device_t *mdev);
 
-void *vfio_mmap_region(mdev_device_t *mdev, __u32 region, size_t *len);
+void *mdev_region_mmap(mdev_device_t *mdev, uint64_t offset, uint64_t size);
+
 int iomem_alloc_dma(mdev_device_t *mdev, struct iomem *iomem);
 int iomem_free_dma(mdev_device_t *mdev, struct iomem *iomem);
 

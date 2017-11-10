@@ -23,6 +23,7 @@
 #include <vfio_api.h>
 #include <sysfs_parse.h>
 #include <eth_stats.h>
+#include <common.h>
 
 #include <uapi/net_mdev.h>
 
@@ -181,6 +182,121 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	return tx_pkts;
 }
 
+static int r8169_mmio_register(pktio_ops_r8169_data_t *pkt_r8169,
+				uint64_t offset, uint64_t size)
+{
+	ODP_ASSERT(pkt_r8169->mmio == NULL);
+
+	pkt_r8169->mmio = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
+	if (pkt_r8169->mmio == MAP_FAILED) {
+		ODP_ERR("Cannot mmap MMIO\n");
+		return -1;
+	}
+
+	pkt_r8169->mmio_len = size;
+
+	ODP_DBG("Register MMIO region: 0x%llx@%016llx\n", size, offset);
+
+	return 0;
+}
+
+static int r8169_rx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
+				    uint64_t offset, uint64_t size)
+{
+	int ret;
+
+	ODP_ASSERT(pkt_r8169->capa.max_input_queues == 0);
+
+	pkt_r8169->rx_ring = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
+	if (pkt_r8169->rx_ring == MAP_FAILED) {
+		ODP_ERR("Cannot mmap RX queue\n");
+		return -1;
+	}
+
+	pkt_r8169->rx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(&pkt_r8169->mdev, &pkt_r8169->rx_data);
+	if (ret) {
+		ODP_ERR("Cannot allocate RX queue DMA area\n");
+		return -1;
+	}
+
+	r8169_rx_refill(pkt_r8169, 0, NUM_RX_DESC);
+
+	pkt_r8169->rx_ring_len = size;
+	pkt_r8169->capa.max_input_queues++;
+
+	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
+
+	return 0;
+}
+
+static int r8169_tx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
+				    uint64_t offset, uint64_t size)
+{
+	int ret;
+
+	ODP_ASSERT(pkt_r8169->capa.max_output_queues == 0);
+
+	pkt_r8169->tx_ring = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
+	if (pkt_r8169->tx_ring == MAP_FAILED) {
+		ODP_ERR("Cannot mmap TX queue\n");
+		return -1;
+	}
+
+	pkt_r8169->tx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(&pkt_r8169->mdev, &pkt_r8169->tx_data);
+	if (ret) {
+		ODP_ERR("Cannot allocate TX queue DMA area\n");
+		return -1;
+	}
+
+	pkt_r8169->tx_ring_len = size;
+	pkt_r8169->capa.max_output_queues++;
+
+	ODP_DBG("Register TX queue region: 0x%llx@%016llx\n", size, offset);
+
+	return 0;
+}
+
+static int r8169_region_info_cb(mdev_device_t *mdev,
+				 struct vfio_region_info *region_info)
+{
+	pktio_ops_r8169_data_t *pkt_r8169 =
+	    odp_container_of(mdev, pktio_ops_r8169_data_t, mdev);
+	int ret;
+
+	/*
+	 * TODO: parse region_info capabilities instead of hardcoded region
+	 * index and call relevant hook
+	 */
+	switch (region_info->index) {
+	case 2:
+		ret =
+		    r8169_mmio_register(pkt_r8169, region_info->offset,
+					region_info->size);
+		break;
+
+	case VFIO_PCI_NUM_REGIONS + VFIO_NET_MDEV_RX_REGION_INDEX:
+		ret =
+		    r8169_rx_queue_register(pkt_r8169, region_info->offset,
+					    region_info->size);
+		break;
+
+	case VFIO_PCI_NUM_REGIONS + VFIO_NET_MDEV_TX_REGION_INDEX:
+		ret =
+		    r8169_tx_queue_register(pkt_r8169, region_info->offset,
+					    region_info->size);
+		break;
+
+	default:
+		ODP_ERR("Unexpected region %u\n", region_info->index);
+		ret = -1;
+		break;
+	}
+
+	return ret;
+}
+
 static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 		      const char *resource, odp_pool_t pool)
 {
@@ -199,53 +315,16 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 
 	ODP_DBG("%s: open %s\n", MODULE_NAME, pkt_r8169->if_name);
 
-	ret = mdev_device_create(&pkt_r8169->mdev, MODULE_NAME, pkt_r8169->if_name);
+	ret =
+	    mdev_device_create(&pkt_r8169->mdev, MODULE_NAME,
+			       pkt_r8169->if_name, r8169_region_info_cb);
 	if (ret)
 		goto out;
 
 	pkt_r8169->pool = pool;
 
-	pkt_r8169->capa.max_input_queues = 1;
-	pkt_r8169->capa.max_output_queues = 1;
-
 	odp_ticketlock_init(&pkt_r8169->rx_lock);
 	odp_ticketlock_init(&pkt_r8169->tx_lock);
-
-	pkt_r8169->mmio = vfio_mmap_region(&pkt_r8169->mdev, 2, &pkt_r8169->mmio_len);
-	if (!pkt_r8169->mmio) {
-		ODP_ERR("Cannot map MMIO\n");
-		goto out;
-	}
-
-	pkt_r8169->rx_ring = vfio_mmap_region(&pkt_r8169->mdev, VFIO_PCI_NUM_REGIONS +
-					      VFIO_NET_MDEV_RX_REGION_INDEX,
-					      &pkt_r8169->rx_ring_len);
-	if (!pkt_r8169->rx_ring) {
-		ODP_ERR("Cannot map RxRing\n");
-		goto out;
-	}
-	pkt_r8169->tx_ring = vfio_mmap_region(&pkt_r8169->mdev, VFIO_PCI_NUM_REGIONS +
-					      VFIO_NET_MDEV_TX_REGION_INDEX,
-					      &pkt_r8169->tx_ring_len);
-	if (!pkt_r8169->tx_ring) {
-		ODP_ERR("Cannot map TxRing\n");
-		goto out;
-	}
-
-	/* FIXME decide on allocated areas per hardware instead of getting 2MB
-	 * per direction
-	 */
-	pkt_r8169->rx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(&pkt_r8169->mdev, &pkt_r8169->rx_data);
-	if (ret)
-		goto out;
-
-	pkt_r8169->tx_data.size = 2 * 1024 * 1024;
-	ret = iomem_alloc_dma(&pkt_r8169->mdev, &pkt_r8169->tx_data);
-	if (ret)
-		goto out;
-
-	r8169_rx_refill(pkt_r8169, 0, NUM_RX_DESC);
 
 	r8169_wait_link_up(pktio_entry);
 

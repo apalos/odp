@@ -21,6 +21,7 @@
 #include <sysfs_parse.h>
 
 #include <odp_debug_internal.h>
+#include <odp_align_internal.h>
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 static const char *vfio_fail_str[] = {
@@ -228,24 +229,24 @@ static int vfio_get_region_cap_type(int device, struct vfio_region_info *region_
 /**
  * Get specific region info
  */
-static int vfio_get_region(mdev_device_t * mdev,
+static int vfio_get_region(mdev_device_t *mdev,
 			   struct vfio_region_info *region_info, __u32 region)
 {
 	int ret;
 	__u16 id = VFIO_REGION_INFO_CAP_TYPE;
 
+	ODP_DBG("Region:%d\n", region);
 	region_info->index = region;
+
 	ret = ioctl(mdev->device, VFIO_DEVICE_GET_REGION_INFO, region_info);
-	ODP_DBG("Region:%d ", region);
 	if (ret < 0) {
 		vfio_print_fail(VFIO_DEVICE_GET_REGION_INFO);
 		return ret;
 	}
 
-	if (!region_info->size) {
-		ODP_ERR("unimplemented PCI BAR\n");
-		return -EINVAL;
-	}
+	if (!region_info->size)
+		return 0;
+
 	/*  FIXME call proper function and id, Rx/Tx descriptors are types
 	 * BAR regions are sparse mmaps
 	 */
@@ -258,34 +259,16 @@ static int vfio_get_region(mdev_device_t * mdev,
 }
 
 /**
- * mmap a PCI region
+ * mmap a VFIO region
  */
-void *vfio_mmap_region(mdev_device_t *mdev, __u32 region, size_t *len)
+void *mdev_region_mmap(mdev_device_t *mdev, uint64_t offset, uint64_t size)
 {
-	int ret;
-	struct vfio_region_info region_info = { .argsz = sizeof(region_info) };
-	void *mapped;
+	/* Make sure we're page aligned */
+	ODP_ASSERT(offset == ROUNDUP_ALIGN(offset, ODP_PAGE_SIZE));
+	ODP_ASSERT(size == ROUNDUP_ALIGN(size, ODP_PAGE_SIZE));
 
-	ret = vfio_get_region(mdev, &region_info, region);
-	/* api returns -EINVAL for unimplemented bars */
-	if (!region_info.size || ret)
-		return NULL;
-
-	ODP_DBG("region:%d size %lu, offset 0x%lx, flags 0x%x\n", region,
-	       (unsigned long)region_info.size,
-	       (unsigned long)region_info.offset, region_info.flags);
-	if (!(region_info.flags & VFIO_REGION_INFO_FLAG_MMAP))
-		return NULL;
-
-	mapped = mmap(NULL, region_info.size, PROT_READ | PROT_WRITE,
-		      MAP_SHARED, mdev->device, region_info.offset);
-	if (mapped == MAP_FAILED) {
-		ODP_ERR("mmap failed\n");
-		return NULL;
-	}
-	*len = region_info.size;
-
-	return mapped;
+	return mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED,
+		    mdev->device, offset);
 }
 
 /**
@@ -366,8 +349,8 @@ static int vfio_init_dev(int grp, int container,
 			 struct vfio_iommu_type1_info *iommu_info,
 			 struct vfio_device_info *dev_info, char *grp_uuid)
 {
-	int ret;
 	int device = -1;
+	int ret;
 
 	ret = ioctl(container, VFIO_CHECK_EXTENSION, VFIO_TYPE1_IOMMU);
 	if (ret < 0) {
@@ -418,18 +401,21 @@ static int vfio_init_dev(int grp, int container,
 
 	ODP_DBG("Device %d Regions: %d, irqs:%d\n", device,
 	       dev_info->num_regions, dev_info->num_irqs);
+
 out:
 	return device;
 }
 
 int mdev_device_create(mdev_device_t *mdev, const char *mod_name,
-		       const char *if_name)
+		       const char *if_name,
+		       mdev_region_info_cb_t region_info_cb)
 {
 	struct vfio_group_status group_status = {.argsz =
 		    sizeof(group_status) };
 	struct vfio_iommu_type1_info iommu_info = {.argsz =
 		    sizeof(iommu_info) };
 	struct vfio_device_info device_info = {.argsz = sizeof(device_info) };
+	int ret;
 
 	memset(mdev, 0, sizeof(*mdev));
 	mdev->container = -1;
@@ -461,6 +447,25 @@ int mdev_device_create(mdev_device_t *mdev, const char *mod_name,
 			  &iommu_info, &device_info, mdev->group_uuid);
 	if (mdev->device < 0)
 		goto fail;
+
+	for (uint32_t region = 0; region < device_info.num_regions; region++) {
+		struct vfio_region_info region_info;
+
+		region_info.argsz = sizeof(region_info);
+
+		ret = vfio_get_region(mdev, &region_info, region);
+		if (ret < 0)
+			continue;
+
+		if (!region_info.size)
+			continue;
+
+		ret = region_info_cb(mdev, &region_info);
+		if (ret < 0) {
+			ODP_ERR("Region info cb fail on region_info[%u]\n", region);
+			return -1;
+		}
+	}
 
 	return 0;
 

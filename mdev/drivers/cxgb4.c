@@ -27,6 +27,7 @@
 #include <vfio_api.h>
 #include <sysfs_parse.h>
 #include <eth_stats.h>
+#include <common.h>
 
 #include <uapi/net_mdev.h>
 
@@ -137,6 +138,39 @@ static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num);
 static void cxgb4_wait_link_up(pktio_entry_t *pktio_entry);
 static int cxgb4_close(pktio_entry_t *pktio_entry);
 
+static int cxgb4_mmio_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
+				uint64_t offset, uint64_t size)
+{
+	ODP_ASSERT(pkt_cxgb4->mmio == NULL);
+
+	pkt_cxgb4->mmio = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
+	if (pkt_cxgb4->mmio == MAP_FAILED) {
+		ODP_ERR("Cannot mmap MMIO\n");
+		return -1;
+	}
+
+	pkt_cxgb4->mmio_len = size;
+
+	ODP_DBG("Register MMIO region: 0x%llx@%016llx\n", size, offset);
+
+	return 0;
+}
+
+static int cxgb4_region_info_cb(mdev_device_t *mdev,
+				struct vfio_region_info *region_info)
+{
+	pktio_ops_cxgb4_data_t *pkt_cxgb4 =
+	    odp_container_of(mdev, pktio_ops_cxgb4_data_t, mdev);
+	int ret;
+
+	/* TODO: parse region_info and call relevant hook */
+	ret =
+	    cxgb4_mmio_register(pkt_cxgb4, region_info->offset,
+				region_info->size);
+
+	return ret;
+}
+
 static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 		       pktio_entry_t * pktio_entry,
 		       const char *resource, odp_pool_t pool)
@@ -156,7 +190,9 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 
 	ODP_DBG("%s: open %s\n", MODULE_NAME, pkt_cxgb4->if_name);
 
-	ret = mdev_device_create(&pkt_cxgb4->mdev, MODULE_NAME, pkt_cxgb4->if_name);
+	ret =
+	    mdev_device_create(&pkt_cxgb4->mdev, MODULE_NAME,
+			       pkt_cxgb4->if_name, cxgb4_region_info_cb);
 	if (ret)
 		goto out;
 
