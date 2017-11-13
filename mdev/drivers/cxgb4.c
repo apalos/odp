@@ -85,7 +85,7 @@ typedef struct {
 	uint16_t rx_next;		/**< Next RX desc to handle */
 
 	uint8_t *rx_data_base;		/**< RX packet payload area VA */
-	uint64_t rx_iova_base;		/**< RX packet payload area IOVA */
+	uint64_t rx_data_iova;		/**< RX packet payload area IOVA */
 	uint32_t rx_data_size;		/**< RX packet payload area size */
 
 	uint32_t gen:1;			/**< RX queue generation */
@@ -119,9 +119,9 @@ typedef struct {
 	uint16_t tx_queue_len;		/**< Number of TX desc entries */
 	uint16_t tx_next;		/**< Next TX desc to insert */
 
-	uint8_t *rx_data_base;		/**< TX packet payload area VA */
-	uint64_t rx_iova_base;		/**< TX packet payload area IOVA */
-	uint32_t rx_data_size;		/**< TX packet payload area size */
+	uint8_t *tx_data_base;		/**< TX packet payload area VA */
+	uint64_t tx_data_iova;		/**< TX packet payload area IOVA */
+	uint32_t tx_data_size;		/**< TX packet payload area size */
 
 	uint32_t padding[5];
 } cxgb4_tx_queue_t ODPDRV_ALIGNED_CACHE;
@@ -144,8 +144,8 @@ typedef struct {
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
-	void *mmio;			/**< BAR0 mmap */
-	size_t mmio_len;		/**< MMIO mmap'ed region length */
+	uint8_t *mmio;			/**< MMIO region */
+	size_t mmio_len;		/**< MMIO region length */
 
 	mdev_device_t mdev;		/**< Common mdev data */
 
@@ -174,6 +174,99 @@ static int cxgb4_mmio_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	return 0;
 }
 
+static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
+				   uint64_t offset, uint64_t size,
+				   uint64_t free_list_offset)
+{
+	cxgb4_rx_queue_t *rxq =
+	    &pkt_cxgb4->rx_queues[pkt_cxgb4->capa.max_input_queues++];
+	uint32_t doorbell_offset = 0;	/* TODO: sysfs */
+	uint32_t qhandle = 0;	/* TODO: sysfs */
+	struct iomem rx_data;
+	int ret;
+
+	ODP_ASSERT(pkt_cxgb4->capa.max_input_queues <=
+		   ARRAY_SIZE(pkt_cxgb4->rx_queues));
+
+	rxq->doorbell = (odpdrv_u32be_t *) (pkt_cxgb4->mmio + doorbell_offset);
+	rxq->qhandle = qhandle;
+
+	rxq->rx_queue_len = 1024; /* TODO: ethtool */
+	rxq->free_list_len = 72; /* TODO: sysfs */
+
+	rxq->desc = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
+	if (rxq->desc == MAP_FAILED) {
+		ODP_ERR("Cannot mmap TX queue\n");
+		return -1;
+	}
+
+	rxq->free_list =
+	    mdev_region_mmap(&pkt_cxgb4->mdev, free_list_offset, ODP_PAGE_SIZE);
+	if (rxq->free_list == MAP_FAILED) {
+		ODP_ERR("Cannot mmap TX queue\n");
+		return -1;
+	}
+
+	rx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(&pkt_cxgb4->mdev, &rx_data);
+	if (ret) {
+		ODP_ERR("Cannot allocate TX queue DMA area\n");
+		return -1;
+	}
+	rxq->rx_data_base = rx_data.vaddr;
+	rxq->rx_data_iova = rx_data.iova;
+	rxq->rx_data_size = rx_data.size;
+
+	/*
+	 * Leave 1 HW block (8 entries) unpopulated,
+	 * otherwise HW will think the free list is empty.
+	 */
+	cxgb4_rx_refill(rxq, rxq->free_list_len - 8);
+
+	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
+
+	return 0;
+}
+
+static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
+				   uint64_t offset, uint64_t size)
+{
+	cxgb4_tx_queue_t *txq =
+	    &pkt_cxgb4->tx_queues[pkt_cxgb4->capa.max_output_queues++];
+	uint32_t doorbell_offset = 0;	/* TODO: sysfs */
+	uint32_t qhandle = 0;	/* TODO: sysfs */
+	struct iomem tx_data;
+	int ret;
+
+	ODP_ASSERT(pkt_cxgb4->capa.max_output_queues <=
+		   ARRAY_SIZE(pkt_cxgb4->tx_queues));
+
+	txq->doorbell = (odpdrv_u32be_t *) (pkt_cxgb4->mmio + doorbell_offset);
+	txq->qhandle = qhandle;
+
+	txq->tx_queue_len = 1024; /* TODO: ethtool */
+
+	txq->desc = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
+	if (txq->desc == MAP_FAILED) {
+		ODP_ERR("Cannot mmap TX queue\n");
+		return -1;
+	}
+
+	tx_data.size = 2 * 1024 * 1024;
+	ret = iomem_alloc_dma(&pkt_cxgb4->mdev, &tx_data);
+	if (ret) {
+		ODP_ERR("Cannot allocate TX queue DMA area\n");
+		return -1;
+	}
+	txq->tx_data_base = tx_data.vaddr;
+	txq->tx_data_iova = tx_data.iova;
+	txq->tx_data_size = tx_data.size;
+
+	ODP_DBG("Register TX queue region: 0x%llx@%016llx\n", size, offset);
+
+	return 0;
+}
+
 static int cxgb4_region_info_cb(mdev_device_t *mdev,
 				struct vfio_region_info *region_info)
 {
@@ -185,6 +278,9 @@ static int cxgb4_region_info_cb(mdev_device_t *mdev,
 	ret =
 	    cxgb4_mmio_register(pkt_cxgb4, region_info->offset,
 				region_info->size);
+
+	ret = cxgb4_rx_queue_register(pkt_cxgb4, 0, 0, 0);
+	ret = cxgb4_tx_queue_register(pkt_cxgb4, 0, 0);
 
 	return ret;
 }
@@ -221,16 +317,6 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 	for (uint32_t i = 0; i < ARRAY_SIZE(pkt_cxgb4->tx_locks); i++)
 		odp_ticketlock_init(&pkt_cxgb4->tx_locks[i]);
 
-	for (uint32_t i = 0; i < ARRAY_SIZE(pkt_cxgb4->rx_queues); i++) {
-		cxgb4_rx_queue_t *rxq = &pkt_cxgb4->rx_queues[i];
-
-		/*
-		 * Leave 1 HW block (8 entries) unpopulated,
-		 * otherwise HW will think the free list is empty.
-		 */
-		cxgb4_rx_refill(rxq, rxq->free_list_len - 8);
-	}
-
 	cxgb4_wait_link_up(pktio_entry);
 
 	ODP_DBG("%s: open %s is successful\n", MODULE_NAME, pkt_cxgb4->if_name);
@@ -263,7 +349,7 @@ static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num)
 	rxq->commit_pending += num;
 
 	while (num) {
-		uint64_t iova = rxq->rx_iova_base + rxq->pidx * ODP_PAGE_SIZE;
+		uint64_t iova = rxq->rx_data_iova + rxq->pidx * ODP_PAGE_SIZE;
 
 		rxq->free_list[rxq->pidx] = odpdrv_cpu_to_be_64(iova);
 
