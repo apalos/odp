@@ -122,7 +122,7 @@ typedef struct {
 	uint64_t rx_iova_base;		/**< TX packet payload area IOVA */
 	uint32_t rx_data_size;		/**< TX packet payload area size */
 
-	uint32_t padding[7];
+	uint32_t padding[5];
 } cxgb4_tx_queue_t ODPDRV_ALIGNED_CACHE;
 
 /** Packet socket using mediated cxgb4 device */
