@@ -104,8 +104,25 @@ typedef struct {
 /* TX queue definitions */
 #define CXGB4_TX_QUEUE_NUM_MAX 32
 
+typedef struct {
+	odpdrv_u64be_t data[8];
+} cxgb4_tx_desc_t;
+
 /** TX queue data */
 typedef struct {
+	cxgb4_tx_desc_t *desc;		/**< TX queue base */
+
+	odpdrv_u32be_t *doorbell;	/**< TX queue doorbell */
+	uint32_t qhandle;		/**< 'Key' to the doorbell */
+
+	uint16_t tx_queue_len;		/**< Number of TX desc entries */
+	uint16_t tx_next;		/**< Next TX desc to insert */
+
+	uint8_t *rx_data_base;		/**< TX packet payload area VA */
+	uint64_t rx_iova_base;		/**< TX packet payload area IOVA */
+	uint32_t rx_data_size;		/**< TX packet payload area size */
+
+	uint32_t padding[7];
 } cxgb4_tx_queue_t ODPDRV_ALIGNED_CACHE;
 
 /** Packet socket using mediated cxgb4 device */
@@ -138,7 +155,7 @@ static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num);
 static void cxgb4_wait_link_up(pktio_entry_t *pktio_entry);
 static int cxgb4_close(pktio_entry_t *pktio_entry);
 
-static int cxgb4_mmio_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
+static int cxgb4_mmio_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 				uint64_t offset, uint64_t size)
 {
 	ODP_ASSERT(pkt_cxgb4->mmio == NULL);
