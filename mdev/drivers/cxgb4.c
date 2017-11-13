@@ -76,21 +76,22 @@ typedef struct {
 
 /** RX queue data */
 typedef struct {
-	uint32_t gen:1;			/**< RX queue generation */
-
-	uint32_t rx_data_size;		/**< RX packet payload area size */
-	uint8_t *rx_data_base;		/**< RX packet payload area VA */
-	uint64_t rx_iova_base;		/**< RX packet payload area IOVA */
-
 	cxgb4_rx_desc_t *desc;		/**< RX queue base */
-
-	odpdrv_u64be_t *free_list;	/**< Free list base */
 
 	odpdrv_u32be_t *doorbell;	/**< Free list refill doorbell */
 	uint32_t qhandle;		/**< 'Key' to the doorbell */
 
 	uint16_t rx_queue_len;		/**< Number of RX desc entries */
 	uint16_t rx_next;		/**< Next RX desc to handle */
+
+	uint8_t *rx_data_base;		/**< RX packet payload area VA */
+	uint64_t rx_iova_base;		/**< RX packet payload area IOVA */
+	uint32_t rx_data_size;		/**< RX packet payload area size */
+
+	uint32_t gen:1;			/**< RX queue generation */
+	uint32_t padding:31;
+
+	odpdrv_u64be_t *free_list;	/**< Free list base */
 
 	uint8_t free_list_len;		/**< Number of free list entries */
 	uint8_t commit_pending;		/**< Free list entries pending commit */
