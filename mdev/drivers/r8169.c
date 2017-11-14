@@ -28,11 +28,6 @@
 
 #define MODULE_NAME "r8169"
 
-/* Common code. TODO: relocate */
-#if 1
-typedef unsigned long dma_addr_t;
-#endif
-
 /** Packet socket using mediated r8169 device */
 typedef struct {
 	/* RX queue hot data */
@@ -364,11 +359,11 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 
 	while (num) {
 		r8169_rx_desc_t *rxd = &pkt_r8169->rx_descs[i];
-		dma_addr_t dma_addr =
-		    pkt_r8169->rx_data.iova + i * R8169_RX_BUF_SIZE;
+		uint32_t offset = i * R8169_RX_BUF_SIZE;
 		uint32_t opts1;
 
-		rxd->addr = odpdrv_cpu_to_le_64(dma_addr);
+		rxd->addr =
+		    odpdrv_cpu_to_le_64(pkt_r8169->rx_data.iova + offset);
 		rxd->opts2 = odpdrv_cpu_to_le_32(0);
 
 		if (odp_likely(i < NUM_RX_DESC - 1)) {

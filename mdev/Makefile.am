@@ -20,7 +20,6 @@ noinst_HEADERS = \
 		$(srcdir)/include/common.h \
 		$(srcdir)/include/vfio_api.h \
 		$(srcdir)/include/reg_api.h \
-		$(srcdir)/include/drivers/driver_ops.h \
 		$(srcdir)/include/drivers/r8169.h
 
 __LIB__libnet_mdev_r8169_la_SOURCES = \

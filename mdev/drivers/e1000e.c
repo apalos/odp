@@ -31,14 +31,6 @@
 
 #define MODULE_NAME "e1000e"
 
-/* Common code. TODO: relocate */
-#if 1
-#define barrier() __asm__ __volatile__("": : :"memory")
-#define dma_wmb() barrier()
-#define dma_rmb() barrier()
-typedef unsigned long dma_addr_t;
-#endif
-
 /* TX queue definitions */
 #define E1000E_TX_QUEUE_SIZE_DEFAULT 256
 #define E1000E_TX_QUEUE_SIZE_MIN 64
@@ -335,10 +327,10 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 
 	while (num) {
 		e1000e_rx_desc_t *rxd = &pkt_e1000e->rx_descs[i];
-		dma_addr_t dma_addr =
-		    pkt_e1000e->rx_data.iova + i * E1000E_RX_BUF_SIZE;
+		uint32_t offset = i * E1000E_RX_BUF_SIZE;
 
-		rxd->read.buffer_addr = odpdrv_cpu_to_le_64(dma_addr);
+		rxd->read.buffer_addr =
+		    odpdrv_cpu_to_le_64(pkt_e1000e->rx_data.iova + offset);
 		// rxd->read.reserved
 		// rxd->wb
 
@@ -350,8 +342,7 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 
 	dma_wmb();
 
-	io_write32(odpdrv_cpu_to_le_32(i),
-		   pkt_e1000e->mmio + E1000_RDT_OFFSET);
+	io_write32(odpdrv_cpu_to_le_32(i), pkt_e1000e->mmio + E1000_RDT_OFFSET);
 }
 
 static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,

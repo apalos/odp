@@ -34,18 +34,6 @@
 
 #define CXGB4_TX_BUF_SIZE 2048U
 
-/* Common code. TODO: relocate */
-#if 1
-#define barrier() __asm__ __volatile__("": : :"memory")
-#define dma_wmb() barrier()
-#define dma_rmb() barrier()
-typedef unsigned long dma_addr_t;
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#define MAX(a, b) (((a) > (b)) ? (a) : (b))
-#define MIN(a, b) (((a) < (b)) ? (a) : (b))
-#endif
-
-
 /* RX queue definitions */
 #define CXGB4_RX_QUEUE_NUM_MAX 32
 
