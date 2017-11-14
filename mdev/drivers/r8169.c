@@ -36,19 +36,19 @@ typedef unsigned long dma_addr_t;
 
 /** Packet socket using mediated r8169 device */
 typedef struct {
-	/* RX ring hot data */
+	/* RX queue hot data */
 	odp_bool_t lockless_rx;		/**< no locking for RX */
-	odp_ticketlock_t rx_lock;	/**< RX ring lock */
-	struct r8169_rxdesc *rx_ring;	/**< RX ring mmap */
+	odp_ticketlock_t rx_lock;	/**< RX queue lock */
+	r8169_rx_desc_t *rx_descs;	/**< RX queue mmap */
 	struct iomem rx_data;		/**< RX packet payload mmap */
-	uint16_t rx_next;		/**< next entry in RX ring to use */
+	uint16_t rx_next;		/**< next entry in RX queue to use */
 
-	/* TX ring hot data */
+	/* TX queue hot data */
 	odp_bool_t lockless_tx;		/**< no locking for TX */
-	odp_ticketlock_t tx_lock;	/**< TX ring lock */
-	struct r8169_txdesc *tx_ring;	/**< TX ring mmap */
+	odp_ticketlock_t tx_lock;	/**< TX queue lock */
+	r8169_tx_desc_t *tx_descs;	/**< TX queue mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
-	uint16_t tx_next;		/**< next entry in TX ring to use */
+	uint16_t tx_next;		/**< next entry in TX queue to use */
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
@@ -57,8 +57,8 @@ typedef struct {
 	void *mmio;			/**< MMIO mmap */
 	size_t mmio_len;		/**< MMIO mmap'ed region length */
 
-	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
-	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
+	size_t rx_queue_len;		/**< Rx queue region length */
+	size_t tx_queue_len;		/**< Tx queue region length */
 
 	mdev_device_t mdev;		/**< Common mdev data */
 
@@ -78,17 +78,17 @@ static void r8169_flood(pktio_entry_t *pktio_entry)
 	while (1) {
 		tx_pkts = 0;
 		while (tx_pkts < NUM_TX_DESC) {
-			volatile struct r8169_txdesc *tx_desc =
-				&pkt_r8169->tx_ring[pkt_r8169->tx_next];
+			volatile r8169_tx_desc_t *txd =
+				&pkt_r8169->tx_descs[pkt_r8169->tx_next];
 			uint32_t pkt_len = 46;
 			uint32_t offset = pkt_r8169->tx_next * R8169_TX_BUF_SIZE;
 			uint32_t opts[2];
 			uint32_t status;
 
-			status = odpdrv_le_to_cpu_32(tx_desc->opts1);
+			status = odpdrv_le_to_cpu_32(txd->opts1);
 			if (status & DescOwn)
 				break;
-			tx_desc->addr = odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova +
+			txd->addr = odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova +
 							    offset);
 			/* FIXME no fragmentation support */
 			opts[0] = DescOwn;
@@ -102,8 +102,8 @@ static void r8169_flood(pktio_entry_t *pktio_entry)
 
 			status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->tx_next));
 
-			tx_desc->opts1 = odpdrv_cpu_to_le_32(status);
-			tx_desc->opts2 = odpdrv_cpu_to_le_32(opts[1]);
+			txd->opts1 = odpdrv_cpu_to_le_32(status);
+			txd->opts2 = odpdrv_cpu_to_le_32(opts[1]);
 
 			tx_pkts++;
 		}
@@ -127,14 +127,14 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		r8169_flood(pktio_entry);
 
 	while (tx_pkts < num) {
-		volatile struct r8169_txdesc *tx_desc =
-			&pkt_r8169->tx_ring[pkt_r8169->tx_next];
+		volatile r8169_tx_desc_t *txd =
+			&pkt_r8169->tx_descs[pkt_r8169->tx_next];
 		uint32_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
 		uint32_t offset = pkt_r8169->tx_next * R8169_TX_BUF_SIZE;
 		uint32_t opts[2];
 		uint32_t status;
 
-		status = odpdrv_le_to_cpu_32(tx_desc->opts1);
+		status = odpdrv_le_to_cpu_32(txd->opts1);
 		if (status & DescOwn)
 			break;
 		/* Skip oversized packets silently */
@@ -146,7 +146,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
 				       pkt_r8169->tx_data.vaddr + offset);
 
-		tx_desc->addr = odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova + offset);
+		txd->addr = odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova + offset);
 		/* FIXME no fragmentation support */
 		opts[0] = DescOwn;
 		opts[0] |= FirstFrag | LastFrag;
@@ -159,8 +159,8 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 
 		status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->tx_next));
 
-		tx_desc->opts1 = odpdrv_cpu_to_le_32(status);
-		tx_desc->opts2 = odpdrv_cpu_to_le_32(opts[1]);
+		txd->opts1 = odpdrv_cpu_to_le_32(status);
+		txd->opts2 = odpdrv_cpu_to_le_32(opts[1]);
 
 		tx_pkts++;
 	}
@@ -207,8 +207,8 @@ static int r8169_rx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 
 	ODP_ASSERT(pkt_r8169->capa.max_input_queues == 0);
 
-	pkt_r8169->rx_ring = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
-	if (pkt_r8169->rx_ring == MAP_FAILED) {
+	pkt_r8169->rx_descs = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
+	if (pkt_r8169->rx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap RX queue\n");
 		return -1;
 	}
@@ -222,7 +222,7 @@ static int r8169_rx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 
 	r8169_rx_refill(pkt_r8169, 0, NUM_RX_DESC);
 
-	pkt_r8169->rx_ring_len = size;
+	pkt_r8169->rx_queue_len = size;
 	pkt_r8169->capa.max_input_queues++;
 
 	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
@@ -237,8 +237,8 @@ static int r8169_tx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 
 	ODP_ASSERT(pkt_r8169->capa.max_output_queues == 0);
 
-	pkt_r8169->tx_ring = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
-	if (pkt_r8169->tx_ring == MAP_FAILED) {
+	pkt_r8169->tx_descs = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
+	if (pkt_r8169->tx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap TX queue\n");
 		return -1;
 	}
@@ -250,7 +250,7 @@ static int r8169_tx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 		return -1;
 	}
 
-	pkt_r8169->tx_ring_len = size;
+	pkt_r8169->tx_queue_len = size;
 	pkt_r8169->capa.max_output_queues++;
 
 	ODP_DBG("Register TX queue region: 0x%llx@%016llx\n", size, offset);
@@ -350,10 +350,10 @@ static int r8169_close(pktio_entry_t *pktio_entry)
 		iomem_free_dma(&pkt_r8169->mdev, &pkt_r8169->tx_data);
 	if (pkt_r8169->rx_data.vaddr)
 		iomem_free_dma(&pkt_r8169->mdev, &pkt_r8169->rx_data);
-	if (pkt_r8169->tx_ring)
-		munmap(pkt_r8169->tx_ring, pkt_r8169->tx_ring_len);
-	if (pkt_r8169->rx_ring)
-		munmap(pkt_r8169->rx_ring, pkt_r8169->rx_ring_len);
+	if (pkt_r8169->tx_descs)
+		munmap(pkt_r8169->tx_descs, pkt_r8169->tx_queue_len);
+	if (pkt_r8169->rx_descs)
+		munmap(pkt_r8169->rx_descs, pkt_r8169->rx_queue_len);
 	if (pkt_r8169->mmio)
 		munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
 
@@ -368,13 +368,13 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 	ODP_ASSERT(num <= NUM_RX_DESC);
 
 	while (num) {
-		struct r8169_rxdesc *rx_desc = &pkt_r8169->rx_ring[i];
+		r8169_rx_desc_t *rxd = &pkt_r8169->rx_descs[i];
 		dma_addr_t dma_addr =
 		    pkt_r8169->rx_data.iova + i * R8169_RX_BUF_SIZE;
 		uint32_t opts1;
 
-		rx_desc->addr = odpdrv_cpu_to_le_64(dma_addr);
-		rx_desc->opts2 = odpdrv_cpu_to_le_32(0);
+		rxd->addr = odpdrv_cpu_to_le_64(dma_addr);
+		rxd->opts2 = odpdrv_cpu_to_le_32(0);
 
 		if (odp_likely(i < NUM_RX_DESC - 1)) {
 			opts1 = DescOwn | R8169_RX_BUF_SIZE;
@@ -386,7 +386,7 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 		num--;
 
 		dma_wmb();
-		rx_desc->opts1 = odpdrv_cpu_to_le_32(opts1);
+		rxd->opts1 = odpdrv_cpu_to_le_32(opts1);
 	}
 }
 
@@ -398,18 +398,18 @@ static int r8169_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 	int rx_pkts = 0;
 	int ret;
 
-	/* Keep track of the start point to refill RX ring */
+	/* Keep track of the start point to refill RX queue */
 	refill_from = pkt_r8169->rx_next;
 
 	while (rx_pkts < num) {
-		volatile struct r8169_rxdesc *rx_desc =
-		    &pkt_r8169->rx_ring[pkt_r8169->rx_next];
+		volatile r8169_rx_desc_t *rxd =
+		    &pkt_r8169->rx_descs[pkt_r8169->rx_next];
 		odp_packet_hdr_t *pkt_hdr;
 		odp_packet_t pkt;
 		uint16_t pkt_len;
 		uint32_t status;
 
-		status = odpdrv_le_to_cpu_32(rx_desc->opts1);
+		status = odpdrv_le_to_cpu_32(rxd->opts1);
 		if (status & DescOwn)
 			break;
 

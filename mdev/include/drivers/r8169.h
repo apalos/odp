@@ -281,15 +281,16 @@ enum rtl_rx_desc_bit {
 
 #define RsvdMask	0x3fffc000
 
-struct r8169_txdesc {
+typedef struct {
 	odpdrv_u32le_t opts1;
 	odpdrv_u32le_t opts2;
 	odpdrv_u64le_t addr;
-};
+} r8169_tx_desc_t;
 
-struct r8169_rxdesc {
+typedef struct {
 	odpdrv_u32le_t opts1;
 	odpdrv_u32le_t opts2;
 	odpdrv_u64le_t addr;
-};
+} r8169_rx_desc_t;
+
 #endif

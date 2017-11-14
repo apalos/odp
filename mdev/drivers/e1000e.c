@@ -1,8 +1,3 @@
-/*
- * FIXME: add a macro to increment ring index module ring size.
- * FIXME: support variable ring size.
- */
-
 #include "config.h"
 
 #include <odp_posix_extensions.h>
@@ -45,10 +40,10 @@
 typedef unsigned long dma_addr_t;
 #endif
 
-/* TX ring definitions */
-#define E1000E_TX_RING_SIZE_DEFAULT 256
-#define E1000E_TX_RING_SIZE_MIN 64
-#define E1000E_TX_RING_SIZE_MAX 4096
+/* TX queue definitions */
+#define E1000E_TX_QUEUE_SIZE_DEFAULT 256
+#define E1000E_TX_QUEUE_SIZE_MIN 64
+#define E1000E_TX_QUEUE_SIZE_MAX 4096
 
 #define E1000_TDH_OFFSET 0x03810UL
 #define E1000_TDT_OFFSET 0x03818UL
@@ -78,10 +73,10 @@ typedef struct {
 	} upper;
 } e1000e_tx_desc_t;
 
-/* RX ring definitions */
-#define E1000E_RX_RING_SIZE_DEFAULT 256
-#define E1000E_RX_RING_SIZE_MIN 64
-#define E1000E_RX_RING_SIZE_MAX 4096
+/* RX queue definitions */
+#define E1000E_RX_QUEUE_SIZE_DEFAULT 256
+#define E1000E_RX_QUEUE_SIZE_MIN 64
+#define E1000E_RX_QUEUE_SIZE_MAX 4096
 
 #define E1000_RDH_OFFSET 0x02810UL
 #define E1000_RDT_OFFSET 0x02818UL
@@ -122,27 +117,27 @@ typedef struct {
 	/* volatile void *mmio; */
 	uint8_t *mmio;			/**< BAR0 mmap */
 
-	/* RX ring hot data */
+	/* RX queue hot data */
 	odp_bool_t lockless_rx;		/**< no locking for RX */
-	odp_ticketlock_t rx_lock;	/**< RX ring lock */
-	e1000e_rx_desc_t *rx_ring;	/**< RX ring mmap */
+	odp_ticketlock_t rx_lock;	/**< RX queue lock */
+	e1000e_rx_desc_t *rx_descs;	/**< RX queue mmap */
 	struct iomem rx_data;		/**< RX packet payload mmap */
-	uint16_t rx_next;		/**< next entry in RX ring to use */
+	uint16_t rx_next;		/**< next entry in RX queue to use */
 	// rx_tail, rx_head ? (mmio + offset)
 
-	/* TX ring hot data */
+	/* TX queue hot data */
 	odp_bool_t lockless_tx;		/**< no locking for TX */
-	odp_ticketlock_t tx_lock;	/**< TX ring lock */
-	e1000e_tx_desc_t *tx_ring;	/**< TX ring mmap */
+	odp_ticketlock_t tx_lock;	/**< TX queue lock */
+	e1000e_tx_desc_t *tx_descs;	/**< TX queue mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
-	uint16_t tx_next;		/**< next entry in TX ring to use */
+	uint16_t tx_next;		/**< next entry in TX queue to use */
 	// tx_tail, tx_head ? (mmio + offset)
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
-	size_t mmio_len;		/**< MMIO mmap'ed region length */
-	size_t rx_ring_len;		/**< Rx ring mmap'ed region length */
-	size_t tx_ring_len;		/**< Tx ring mmap'ed region length */
+	size_t mmio_len;		/**< MMIO region length */
+	size_t rx_queue_len;		/**< Rx queue region length */
+	size_t tx_queue_len;		/**< Tx queue region length */
 
 	mdev_device_t mdev;		/**< Common mdev data */
 
@@ -181,8 +176,8 @@ static int e1000e_rx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 
 	ODP_ASSERT(pkt_e1000e->capa.max_input_queues == 0);
 
-	pkt_e1000e->rx_ring = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
-	if (pkt_e1000e->rx_ring == MAP_FAILED) {
+	pkt_e1000e->rx_descs = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
+	if (pkt_e1000e->rx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap RX queue\n");
 		return -1;
 	}
@@ -194,9 +189,9 @@ static int e1000e_rx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 		return -1;
 	}
 
-	e1000e_rx_refill(pkt_e1000e, 0, E1000E_RX_RING_SIZE_DEFAULT - 1);
+	e1000e_rx_refill(pkt_e1000e, 0, E1000E_RX_QUEUE_SIZE_DEFAULT - 1);
 
-	pkt_e1000e->rx_ring_len = size;
+	pkt_e1000e->rx_queue_len = size;
 	pkt_e1000e->capa.max_input_queues++;
 
 	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
@@ -211,8 +206,8 @@ static int e1000e_tx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 
 	ODP_ASSERT(pkt_e1000e->capa.max_output_queues == 0);
 
-	pkt_e1000e->tx_ring = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
-	if (pkt_e1000e->tx_ring == MAP_FAILED) {
+	pkt_e1000e->tx_descs = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
+	if (pkt_e1000e->tx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap TX queue\n");
 		return -1;
 	}
@@ -224,7 +219,7 @@ static int e1000e_tx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 		return -1;
 	}
 
-	pkt_e1000e->tx_ring_len = size;
+	pkt_e1000e->tx_queue_len = size;
 	pkt_e1000e->capa.max_output_queues++;
 
 	ODP_DBG("Register TX queue region: 0x%llx@%016llx\n", size, offset);
@@ -325,10 +320,10 @@ static int e1000e_close(pktio_entry_t *pktio_entry)
 		iomem_free_dma(&pkt_e1000e->mdev, &pkt_e1000e->tx_data);
 	if (pkt_e1000e->rx_data.vaddr)
 		iomem_free_dma(&pkt_e1000e->mdev, &pkt_e1000e->rx_data);
-	if (pkt_e1000e->tx_ring)
-		munmap(pkt_e1000e->tx_ring, pkt_e1000e->tx_ring_len);
-	if (pkt_e1000e->rx_ring)
-		munmap(pkt_e1000e->rx_ring, pkt_e1000e->rx_ring_len);
+	if (pkt_e1000e->tx_descs)
+		munmap(pkt_e1000e->tx_descs, pkt_e1000e->tx_queue_len);
+	if (pkt_e1000e->rx_descs)
+		munmap(pkt_e1000e->rx_descs, pkt_e1000e->rx_queue_len);
 	if (pkt_e1000e->mmio)
 		munmap(pkt_e1000e->mmio, pkt_e1000e->mmio_len);
 
@@ -341,19 +336,19 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 	uint16_t i = from;
 
 	/* Need 1 desc gap to keep tail from touching head */
-	ODP_ASSERT(num < E1000E_RX_RING_SIZE_DEFAULT);
+	ODP_ASSERT(num < E1000E_RX_QUEUE_SIZE_DEFAULT);
 
 	while (num) {
-		e1000e_rx_desc_t *rx_desc = &pkt_e1000e->rx_ring[i];
+		e1000e_rx_desc_t *rxd = &pkt_e1000e->rx_descs[i];
 		dma_addr_t dma_addr =
 		    pkt_e1000e->rx_data.iova + i * E1000E_RX_BUF_SIZE;
 
-		rx_desc->read.buffer_addr = odpdrv_cpu_to_le_64(dma_addr);
-		// rx_desc->read.reserved
-		// rx_desc->wb
+		rxd->read.buffer_addr = odpdrv_cpu_to_le_64(dma_addr);
+		// rxd->read.reserved
+		// rxd->wb
 
 		i++;
-		if (i == E1000E_RX_RING_SIZE_DEFAULT)
+		if (i == E1000E_RX_QUEUE_SIZE_DEFAULT)
 			i = 0;
 		num--;
 	}
@@ -372,16 +367,16 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	uint16_t budget = 0;
 	int rx_pkts = 0;
 
-	/* Keep track of the start point to refill RX ring */
+	/* Keep track of the start point to refill RX queue */
 	refill_from = pkt_e1000e->rx_next;
 
 	/*
-	 * Determine how many packets are available in RX ring:
-	 *     (Write_index - Read_index) modulo RX_ring_size
+	 * Determine how many packets are available in RX queue:
+	 *     (Write_index - Read_index) modulo RX queue size
 	 */
 	budget += io_read32(pkt_e1000e->mmio + E1000_RDH_OFFSET);
 	budget -= pkt_e1000e->rx_next;
-	budget &= E1000E_RX_RING_SIZE_DEFAULT - 1;
+	budget &= E1000E_RX_QUEUE_SIZE_DEFAULT - 1;
 
 	if (budget > num)
 		budget = num;
@@ -390,25 +385,25 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 					pkt_table, budget);
 
 	while (rx_pkts < budget) {
-		volatile e1000e_rx_desc_t *rx_desc =
-		    &pkt_e1000e->rx_ring[pkt_e1000e->rx_next];
+		volatile e1000e_rx_desc_t *rxd =
+		    &pkt_e1000e->rx_descs[pkt_e1000e->rx_next];
 		odp_packet_hdr_t *pkt_hdr;
 		odp_packet_t pkt;
 		uint16_t pkt_len;
 		uint32_t status;
 
 		/* TODO: let the HW drop all erroneous packets */
-		status = odpdrv_le_to_cpu_32(rx_desc->wb.upper.status_error);
+		status = odpdrv_le_to_cpu_32(rxd->wb.upper.status_error);
 		if (odp_unlikely(status & E1000E_RX_DESC_STAT_ERR_MASK)) {
 			pkt_e1000e->rx_next++;
-			if (pkt_e1000e->rx_next >= E1000E_RX_RING_SIZE_DEFAULT)
+			if (pkt_e1000e->rx_next >= E1000E_RX_QUEUE_SIZE_DEFAULT)
 				pkt_e1000e->rx_next = 0;
 			odp_packet_free_multi(&pkt_table[rx_pkts],
 					      budget - rx_pkts);
 			break;
 		}
 
-		pkt_len = odpdrv_le_to_cpu_16(rx_desc->wb.upper.length);
+		pkt_len = odpdrv_le_to_cpu_16(rxd->wb.upper.length);
 		pkt = pkt_table[rx_pkts];
 		pkt_hdr = odp_packet_hdr(pkt);
 
@@ -423,7 +418,7 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		pkt_hdr->input = pktio_entry->s.handle;
 
 		pkt_e1000e->rx_next++;
-		if (odp_unlikely(pkt_e1000e->rx_next >= E1000E_RX_RING_SIZE_DEFAULT))
+		if (odp_unlikely(pkt_e1000e->rx_next >= E1000E_RX_QUEUE_SIZE_DEFAULT))
 			pkt_e1000e->rx_next = 0;
 
 		rx_pkts++;
@@ -444,20 +439,20 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	if (!pkt_e1000e->lockless_tx)
 		odp_ticketlock_lock(&pkt_e1000e->tx_lock);
 
-	/* Determine how many packets will fit in TX ring */
-	budget = E1000E_TX_RING_SIZE_DEFAULT - 1;
+	/* Determine how many packets will fit in TX queue */
+	budget = E1000E_TX_QUEUE_SIZE_DEFAULT - 1;
 	budget -= pkt_e1000e->tx_next;
 	budget +=
 	    odpdrv_le_to_cpu_32(io_read32
 			     (pkt_e1000e->mmio + E1000_TDH_OFFSET));
-	budget &= E1000E_TX_RING_SIZE_DEFAULT - 1;
+	budget &= E1000E_TX_QUEUE_SIZE_DEFAULT - 1;
 
 	if (budget > num)
 		budget = num;
 
 	while (budget) {
-		volatile e1000e_tx_desc_t *tx_desc =
-		    &pkt_e1000e->tx_ring[pkt_e1000e->tx_next];
+		volatile e1000e_tx_desc_t *txd =
+		    &pkt_e1000e->tx_descs[pkt_e1000e->tx_next];
 		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
 		uint32_t offset = pkt_e1000e->tx_next * E1000E_TX_BUF_SIZE;
 		uint32_t txd_cmd = E1000_TXD_CMD_IFCS | E1000_TXD_CMD_EOP;
@@ -471,13 +466,13 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
 				       pkt_e1000e->tx_data.vaddr + offset);
 
-		tx_desc->buffer_addr =
+		txd->buffer_addr =
 		    odpdrv_cpu_to_le_64(pkt_e1000e->tx_data.iova + offset);
-		tx_desc->lower.data = odpdrv_cpu_to_le_32(txd_cmd | pkt_len);
-		tx_desc->upper.data = odpdrv_cpu_to_le_32(0);
+		txd->lower.data = odpdrv_cpu_to_le_32(txd_cmd | pkt_len);
+		txd->upper.data = odpdrv_cpu_to_le_32(0);
 
 		pkt_e1000e->tx_next++;
-		if (odp_unlikely(pkt_e1000e->tx_next >= E1000E_TX_RING_SIZE_DEFAULT))
+		if (odp_unlikely(pkt_e1000e->tx_next >= E1000E_TX_QUEUE_SIZE_DEFAULT))
 			pkt_e1000e->tx_next = 0;
 
 		tx_pkts++;

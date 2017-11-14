@@ -78,7 +78,7 @@ typedef struct {
 
 /** RX queue data */
 typedef struct {
-	cxgb4_rx_desc_t *desc;		/**< RX queue base */
+	cxgb4_rx_desc_t *rx_descs;	/**< RX queue base */
 
 	odpdrv_u32be_t *doorbell;	/**< Free list refill doorbell */
 	uint32_t qhandle;		/**< 'Key' to the doorbell */
@@ -148,7 +148,7 @@ typedef struct {
 
 /** TX queue data */
 typedef struct {
-	cxgb4_tx_desc_t *desc;		/**< TX queue base */
+	cxgb4_tx_desc_t *tx_descs;	/**< TX queue base */
 	cxgb4_tx_queue_stats *stats;	/**< TX queue stats */
 
 	odpdrv_u32be_t *doorbell;	/**< TX queue doorbell */
@@ -232,8 +232,8 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	rxq->rx_queue_len = 1024; /* TODO: ethtool */
 	rxq->free_list_len = 72; /* TODO: sysfs */
 
-	rxq->desc = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
-	if (rxq->desc == MAP_FAILED) {
+	rxq->rx_descs = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
+	if (rxq->rx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap TX queue\n");
 		return -1;
 	}
@@ -284,13 +284,13 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
 
 	txq->tx_queue_len = 1024; /* TODO: ethtool */
 
-	txq->desc = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
-	if (txq->desc == MAP_FAILED) {
+	txq->tx_descs = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
+	if (txq->tx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap TX queue\n");
 		return -1;
 	}
 
-	txq->stats = (cxgb4_tx_queue_stats *)(txq->desc + txq->tx_queue_len);
+	txq->stats = (cxgb4_tx_queue_stats *)(txq->tx_descs + txq->tx_queue_len);
 
 	tx_data.size = 2 * 1024 * 1024;
 	ret = iomem_alloc_dma(&pkt_cxgb4->mdev, &tx_data);
@@ -423,7 +423,7 @@ static int cxgb4_recv(pktio_entry_t * pktio_entry,
 		odp_ticketlock_lock(&pkt_cxgb4->rx_locks[index]);
 
 	while (num) {
-		volatile cxgb4_rx_desc_t *rxd = &rxq->desc[rxq->rx_next];
+		volatile cxgb4_rx_desc_t *rxd = &rxq->rx_descs[rxq->rx_next];
 		odp_packet_t pkt;
 		uint32_t pkt_len, offset;
 		uint8_t type;
@@ -546,7 +546,7 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 		budget = num;
 
 	while (budget) {
-		volatile cxgb4_tx_desc_t *tx_desc = &txq->desc[txq->tx_next];
+		volatile cxgb4_tx_desc_t *txd = &txq->tx_descs[txq->tx_next];
 		uint32_t offset = txq->tx_next * CXGB4_TX_BUF_SIZE;
 		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
 
@@ -565,7 +565,7 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 			continue;
 		}
 
-		wr = (volatile cxgb4_fw_eth_tx_pkt_wr_t *)tx_desc;
+		wr = (volatile cxgb4_fw_eth_tx_pkt_wr_t *)txd;
 		cpl = (volatile cxgb4_cpl_tx_pkt_core_t *)(wr + 1);
 		sgl = (volatile cxgb4_sg_list_t *)(cpl + 1);
 
