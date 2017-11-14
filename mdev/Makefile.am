@@ -19,8 +19,7 @@ noinst_HEADERS = \
 		$(srcdir)/include/mm_api.h \
 		$(srcdir)/include/common.h \
 		$(srcdir)/include/vfio_api.h \
-		$(srcdir)/include/reg_api.h \
-		$(srcdir)/include/drivers/r8169.h
+		$(srcdir)/include/reg_api.h
 
 __LIB__libnet_mdev_r8169_la_SOURCES = \
 		api/mm.c \

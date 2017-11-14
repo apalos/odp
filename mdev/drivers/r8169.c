@@ -16,7 +16,6 @@
 
 #include <odp_packet_io_internal.h>
 
-#include <drivers/r8169.h>
 #include <mm_api.h>
 #include <reg_api.h>
 #include <vfio_api.h>
@@ -27,6 +26,34 @@
 #include <uapi/net_mdev.h>
 
 #define MODULE_NAME "r8169"
+
+#define NUM_TX_DESC	64	/* Number of Tx descriptors */
+#define NUM_RX_DESC	256U	/* Number of Rx descriptors */
+
+#define R8169_RX_BUF_SIZE	2048U
+#define R8169_TX_BUF_SIZE	2048U
+
+#define R8169_TXPOLL	0x38
+#define R8169_NPQ	0x40
+
+typedef struct {
+#define	RxRES		(1U << 21)
+#define DescOwn		(1U << 31)	/* Descriptor is owned by NIC */
+#define RingEnd		(1U << 30)	/* End of descriptor ring */
+	odpdrv_u32le_t opts1;
+	odpdrv_u32le_t opts2;
+	odpdrv_u64le_t addr;
+} r8169_rx_desc_t;
+
+typedef struct {
+#define FirstFrag	(1U << 29)	/* First segment of a packet */
+#define LastFrag	(1U << 28)	/* Final segment of a packet */
+#define DescOwn		(1U << 31)	/* Descriptor is owned by NIC */
+#define RingEnd		(1U << 30)	/* End of descriptor ring */
+	odpdrv_u32le_t opts1;
+	odpdrv_u32le_t opts2;
+	odpdrv_u64le_t addr;
+} r8169_tx_desc_t;
 
 /** Packet socket using mediated r8169 device */
 typedef struct {
@@ -101,7 +128,7 @@ static void r8169_flood(pktio_entry_t *pktio_entry)
 		}
 
 		dma_wmb();
-		io_write8(NPQ, (char *)pkt_r8169->mmio + TxPoll);
+		io_write8(R8169_NPQ, (char *)pkt_r8169->mmio + R8169_TXPOLL);
 	}
 }
 
@@ -159,7 +186,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 
 	dma_wmb();
 
-	io_write8(NPQ, (char *)pkt_r8169->mmio + TxPoll);
+	io_write8(R8169_NPQ, (char *)pkt_r8169->mmio + R8169_TXPOLL);
 
 	if (!pkt_r8169->lockless_tx)
 		odp_ticketlock_unlock(&pkt_r8169->tx_lock);
