@@ -4,6 +4,8 @@
 #include <linux/vfio.h>
 #include <net/if.h>
 
+#include <mm_api.h>
+
 typedef struct {
 	int container;
 	int group;

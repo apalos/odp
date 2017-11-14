@@ -20,7 +20,6 @@
 
 #include <protocols/eth.h>
 
-#include <drivers/driver_ops.h>
 #include <mm_api.h>
 #include <reg_api.h>
 #include <vfio_api.h>

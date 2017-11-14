@@ -17,7 +17,6 @@
 #include <odp_packet_io_internal.h>
 
 #include <drivers/r8169.h>
-#include <drivers/driver_ops.h>
 #include <mm_api.h>
 #include <reg_api.h>
 #include <vfio_api.h>
