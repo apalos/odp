@@ -410,19 +410,25 @@ int mdev_device_create(mdev_device_t *mdev, const char *mod_name,
 		       const char *if_name,
 		       mdev_region_info_cb_t region_info_cb)
 {
-	struct vfio_group_status group_status = {.argsz =
-		    sizeof(group_status) };
-	struct vfio_iommu_type1_info iommu_info = {.argsz =
-		    sizeof(iommu_info) };
-	struct vfio_device_info device_info = {.argsz = sizeof(device_info) };
+	struct vfio_group_status group_status = {
+		.argsz = sizeof(group_status)
+	};
+	struct vfio_iommu_type1_info iommu_info = {
+		.argsz = sizeof(iommu_info)
+	};
+	struct vfio_device_info device_info = {
+		.argsz = sizeof(device_info)
+	};
 	int ret;
 
 	memset(mdev, 0, sizeof(*mdev));
 	mdev->container = -1;
 	mdev->group = -1;
 
+	strncpy(mdev->if_name, if_name, sizeof(mdev->if_name) - 1);
+
 	mdev->group_id =
-	    mdev_sysfs_discover(mod_name, if_name, mdev->group_uuid,
+	    mdev_sysfs_discover(mod_name, mdev->if_name, mdev->group_uuid,
 				sizeof(mdev->group_uuid));
 	if (mdev->group_id < 0)
 		goto fail;
@@ -462,7 +468,8 @@ int mdev_device_create(mdev_device_t *mdev, const char *mod_name,
 
 		ret = region_info_cb(mdev, &region_info);
 		if (ret < 0) {
-			ODP_ERR("Region info cb fail on region_info[%u]\n", region);
+			ODP_ERR("Region info cb fail on region_info[%u]\n",
+				region);
 			return -1;
 		}
 	}

@@ -1,6 +1,8 @@
 #ifndef _VFIO_API_H
 #define _VFIO_API_H
+
 #include <linux/vfio.h>
+#include <net/if.h>
 
 typedef struct {
 	int container;
@@ -12,6 +14,8 @@ typedef struct {
 
 	uint8_t *iobase;
 	uint8_t *iocur;
+
+	char if_name[IF_NAMESIZE];	/**< Interface name */
 } mdev_device_t;
 
 typedef int (*mdev_region_info_cb_t)(mdev_device_t *,

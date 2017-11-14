@@ -186,8 +186,6 @@ typedef struct {
 	size_t mmio_len;		/**< MMIO region length */
 
 	mdev_device_t mdev;		/**< Common mdev data */
-
-	char if_name[IF_NAMESIZE];	/**< Interface name */
 } pktio_ops_cxgb4_data_t;
 
 static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num);
@@ -337,16 +335,14 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 	if (strncmp(resource, NET_MDEV_PREFIX, strlen(NET_MDEV_PREFIX)))
 		return -1;
 
-	/* Init pktio entry */
 	memset(pkt_cxgb4, 0, sizeof(*pkt_cxgb4));
-	strncpy(pkt_cxgb4->if_name, resource + strlen(NET_MDEV_PREFIX),
-		sizeof(pkt_cxgb4->if_name - 1));
 
-	ODP_DBG("%s: open %s\n", MODULE_NAME, pkt_cxgb4->if_name);
+	ODP_DBG("%s: probing resource %s\n", MODULE_NAME, resource);
 
 	ret =
 	    mdev_device_create(&pkt_cxgb4->mdev, MODULE_NAME,
-			       pkt_cxgb4->if_name, cxgb4_region_info_cb);
+			       resource + strlen(NET_MDEV_PREFIX),
+			       cxgb4_region_info_cb);
 	if (ret)
 		goto out;
 
@@ -359,7 +355,8 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 
 	cxgb4_wait_link_up(pktio_entry);
 
-	ODP_DBG("%s: open %s is successful\n", MODULE_NAME, pkt_cxgb4->if_name);
+	ODP_DBG("%s: open %s is successful\n", MODULE_NAME,
+		pkt_cxgb4->mdev.if_name);
 
 	return 0;
 
@@ -374,7 +371,7 @@ static int cxgb4_close(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
 
-	ODP_DBG("%s: close %s\n", MODULE_NAME, pkt_cxgb4->if_name);
+	ODP_DBG("%s: close %s\n", MODULE_NAME, pkt_cxgb4->mdev.if_name);
 
 	mdev_device_destroy(&pkt_cxgb4->mdev);
 
@@ -613,7 +610,7 @@ static int cxgb4_link_status(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
 
-	return mdev_get_iff_link(pkt_cxgb4->if_name);
+	return mdev_get_iff_link(pkt_cxgb4->mdev.if_name);
 }
 
 /* TODO: move to common code */

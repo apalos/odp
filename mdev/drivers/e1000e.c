@@ -140,8 +140,6 @@ typedef struct {
 	size_t tx_queue_len;		/**< Tx queue region length */
 
 	mdev_device_t mdev;		/**< Common mdev data */
-
-	char if_name[IF_NAMESIZE];	/**< Interface name */
 } pktio_ops_e1000e_data_t;
 
 static pktio_ops_module_t e1000e_pktio_ops;
@@ -267,7 +265,7 @@ static int e1000e_region_info_cb(mdev_device_t *mdev,
 }
 
 static int e1000e_open(odp_pktio_t id ODP_UNUSED,
-		       pktio_entry_t * pktio_entry,
+		       pktio_entry_t *pktio_entry,
 		       const char *resource, odp_pool_t pool)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
@@ -278,16 +276,14 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 	if (strncmp(resource, NET_MDEV_PREFIX, strlen(NET_MDEV_PREFIX)))
 		return -1;
 
-	/* Init pktio entry */
 	memset(pkt_e1000e, 0, sizeof(*pkt_e1000e));
-	strncpy(pkt_e1000e->if_name, resource + strlen(NET_MDEV_PREFIX),
-		sizeof(pkt_e1000e->if_name) - 1);
 
-	ODP_DBG("%s: open %s\n", MODULE_NAME, pkt_e1000e->if_name);
+	ODP_DBG("%s: probing resource %s\n", MODULE_NAME, resource);
 
 	ret =
 	    mdev_device_create(&pkt_e1000e->mdev, MODULE_NAME,
-			       pkt_e1000e->if_name, e1000e_region_info_cb);
+			       resource + strlen(NET_MDEV_PREFIX),
+			       e1000e_region_info_cb);
 	if (ret)
 		goto out;
 
@@ -298,7 +294,8 @@ static int e1000e_open(odp_pktio_t id ODP_UNUSED,
 
 	e1000e_wait_link_up(pktio_entry);
 
-	ODP_DBG("%s: open %s is successful\n", MODULE_NAME, pkt_e1000e->if_name);
+	ODP_DBG("%s: open %s is successful\n", MODULE_NAME,
+		pkt_e1000e->mdev.if_name);
 
 	return 0;
 
@@ -307,12 +304,11 @@ out:
 	return -1;
 }
 
-
 static int e1000e_close(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
 
-	ODP_DBG("%s: close %s\n", MODULE_NAME, pkt_e1000e->if_name);
+	ODP_DBG("%s: close %s\n", MODULE_NAME, pkt_e1000e->mdev.if_name);
 
 	mdev_device_destroy(&pkt_e1000e->mdev);
 
@@ -501,7 +497,7 @@ static int e1000e_link_status(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
 
-	return mdev_get_iff_link(pkt_e1000e->if_name);
+	return mdev_get_iff_link(pkt_e1000e->mdev.if_name);
 }
 
 /* TODO: move to common code */

@@ -61,8 +61,6 @@ typedef struct {
 	size_t tx_queue_len;		/**< Tx queue region length */
 
 	mdev_device_t mdev;		/**< Common mdev data */
-
-	char if_name[IF_NAMESIZE];	/** Interface name */
 } pktio_ops_r8169_data_t;
 
 static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
@@ -308,16 +306,14 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 	if (strncmp(resource, NET_MDEV_PREFIX, strlen(NET_MDEV_PREFIX)))
 		return -1;
 
-	/* Init pktio entry */
 	memset(pkt_r8169, 0, sizeof(*pkt_r8169));
-	strncpy(pkt_r8169->if_name, resource + strlen(NET_MDEV_PREFIX),
-		sizeof(pkt_r8169->if_name) - 1);
 
-	ODP_DBG("%s: open %s\n", MODULE_NAME, pkt_r8169->if_name);
+	ODP_DBG("%s: probing resource %s\n", MODULE_NAME, resource);
 
 	ret =
 	    mdev_device_create(&pkt_r8169->mdev, MODULE_NAME,
-			       pkt_r8169->if_name, r8169_region_info_cb);
+			       resource + strlen(NET_MDEV_PREFIX),
+			       r8169_region_info_cb);
 	if (ret)
 		goto out;
 
@@ -328,13 +324,13 @@ static int r8169_open(odp_pktio_t id ODP_UNUSED, pktio_entry_t *pktio_entry,
 
 	r8169_wait_link_up(pktio_entry);
 
-	ODP_DBG("%s: open %s is successful\n", MODULE_NAME, pkt_r8169->if_name);
+	ODP_DBG("%s: open %s is successful\n", MODULE_NAME,
+		pkt_r8169->mdev.if_name);
 
 	return 0;
 
 out:
 	r8169_close(pktio_entry);
-
 	return -1;
 }
 
@@ -342,7 +338,7 @@ static int r8169_close(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 
-	ODP_DBG("%s: close %s\n", MODULE_NAME, pkt_r8169->if_name);
+	ODP_DBG("%s: close %s\n", MODULE_NAME, pkt_r8169->mdev.if_name);
 
 	mdev_device_destroy(&pkt_r8169->mdev);
 
@@ -458,7 +454,7 @@ static int r8169_link_status(pktio_entry_t *pktio_entry)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 
-	return mdev_get_iff_link(pkt_r8169->if_name);
+	return mdev_get_iff_link(pkt_r8169->mdev.if_name);
 }
 
 /* TODO: move to common code */
