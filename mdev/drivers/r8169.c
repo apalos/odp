@@ -84,66 +84,14 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 static void r8169_wait_link_up(pktio_entry_t *pktio_entry);
 static int r8169_close(pktio_entry_t *pktio_entry);
 
-static void r8169_flood(pktio_entry_t *pktio_entry)
-{
-	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
-	int tx_pkts;
-
-	while (1) {
-		tx_pkts = 0;
-		while (tx_pkts < pkt_r8169->tx_queue_len) {
-			volatile r8169_tx_desc_t *txd =
-			    &pkt_r8169->tx_descs[pkt_r8169->tx_next];
-			uint32_t pkt_len = 46;
-			uint32_t offset =
-			    pkt_r8169->tx_next * R8169_TX_BUF_SIZE;
-			uint32_t opts[2];
-			uint32_t status;
-
-			status = odpdrv_le_to_cpu_32(txd->opts1);
-			if (status & DescOwn)
-				break;
-			txd->addr =
-			    odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova +
-						offset);
-			/* FIXME no fragmentation support */
-			opts[0] = DescOwn;
-			opts[0] |= FirstFrag | LastFrag;
-			/* FIXME No vlan support */
-			opts[1] = 0;
-
-			pkt_r8169->tx_next++;
-			if (odp_unlikely
-			    (pkt_r8169->tx_next >= pkt_r8169->tx_queue_len))
-				pkt_r8169->tx_next = 0;
-
-			status =
-			    opts[0] | pkt_len | (RingEnd *
-						 !(pkt_r8169->tx_next));
-
-			txd->opts1 = odpdrv_cpu_to_le_32(status);
-			txd->opts2 = odpdrv_cpu_to_le_32(opts[1]);
-
-			tx_pkts++;
-		}
-
-		dma_wmb();
-		io_write8(R8169_NPQ, (char *)pkt_r8169->mmio + R8169_TXPOLL);
-	}
-}
-
 static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		      const odp_packet_t pkt_table[] ODP_UNUSED, int num)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
 	int tx_pkts = 0;
-	int flood = 0;
 
 	if (!pkt_r8169->lockless_tx)
 		odp_ticketlock_lock(&pkt_r8169->tx_lock);
-
-	if (flood)
-		r8169_flood(pktio_entry);
 
 	while (tx_pkts < num) {
 		volatile r8169_tx_desc_t *txd =
@@ -156,6 +104,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		status = odpdrv_le_to_cpu_32(txd->opts1);
 		if (status & DescOwn)
 			break;
+
 		/* Skip oversized packets silently */
 		if (pkt_len > R8169_TX_BUF_SIZE) {
 			tx_pkts++;
@@ -490,6 +439,7 @@ static pktio_ops_module_t r8169_pktio_ops = {
 
 	.recv = r8169_recv,
 	.send = r8169_send,
+
 	.link_status = r8169_link_status,
 };
 
