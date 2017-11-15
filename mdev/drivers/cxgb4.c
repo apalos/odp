@@ -170,7 +170,6 @@ typedef struct {
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
 	uint8_t *mmio;			/**< MMIO region */
-	size_t mmio_len;		/**< MMIO region length */
 
 	mdev_device_t mdev;		/**< Common mdev data */
 } pktio_ops_cxgb4_data_t;
@@ -189,8 +188,6 @@ static int cxgb4_mmio_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 		ODP_ERR("Cannot mmap MMIO\n");
 		return -1;
 	}
-
-	pkt_cxgb4->mmio_len = size;
 
 	ODP_DBG("Register MMIO region: 0x%llx@%016llx\n", size, offset);
 
@@ -361,9 +358,6 @@ static int cxgb4_close(pktio_entry_t *pktio_entry)
 	ODP_DBG("%s: close %s\n", MODULE_NAME, pkt_cxgb4->mdev.if_name);
 
 	mdev_device_destroy(&pkt_cxgb4->mdev);
-
-	if (pkt_cxgb4->mmio)
-		munmap(pkt_cxgb4->mmio, pkt_cxgb4->mmio_len);
 
 	return 0;
 }

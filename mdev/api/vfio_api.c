@@ -263,12 +263,25 @@ static int vfio_get_region(mdev_device_t *mdev,
  */
 void *mdev_region_mmap(mdev_device_t *mdev, uint64_t offset, uint64_t size)
 {
+	void *addr;
+
 	/* Make sure we're page aligned */
 	ODP_ASSERT(offset == ROUNDUP_ALIGN(offset, ODP_PAGE_SIZE));
 	ODP_ASSERT(size == ROUNDUP_ALIGN(size, ODP_PAGE_SIZE));
 
-	return mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED,
+	if (mdev->mappings_count >= ARRAY_SIZE(mdev->mappings))
+		return MAP_FAILED;
+
+	addr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED,
 		    mdev->device, offset);
+	if (addr == MAP_FAILED)
+		return addr;
+
+	mdev->mappings[mdev->mappings_count].addr = addr;
+	mdev->mappings[mdev->mappings_count].size = size;
+	mdev->mappings_count++;
+
+	return addr;
 }
 
 /**
@@ -480,7 +493,7 @@ fail:
 	return -1;
 }
 
-void mdev_device_destroy(mdev_device_t *mdev ODP_UNUSED)
+void mdev_device_destroy(mdev_device_t *mdev)
 {
 	if (mdev->group != -1)
 		close(mdev->group);
@@ -488,6 +501,9 @@ void mdev_device_destroy(mdev_device_t *mdev ODP_UNUSED)
 		close(mdev->container);
 	if (mdev->iobase)
 		iomem_free(mdev->iobase);
+
+	for (uint16_t i = 0; i < mdev->mappings_count; i++)
+		munmap(mdev->mappings[i].addr, mdev->mappings[i].size);
 }
 
 int mdev_attr_get(mdev_device_t *mdev, const char *attr, char *buf)

@@ -76,10 +76,6 @@ typedef struct {
 	odp_pool_t pool;		/**< pool to alloc packets from */
 
 	void *mmio;			/**< MMIO mmap */
-	size_t mmio_len;		/**< MMIO mmap'ed region length */
-
-	size_t rx_queue_len;		/**< Rx queue region length */
-	size_t tx_queue_len;		/**< Tx queue region length */
 
 	mdev_device_t mdev;		/**< Common mdev data */
 } pktio_ops_r8169_data_t;
@@ -212,8 +208,6 @@ static int r8169_mmio_register(pktio_ops_r8169_data_t *pkt_r8169,
 		return -1;
 	}
 
-	pkt_r8169->mmio_len = size;
-
 	ODP_DBG("Register MMIO region: 0x%llx@%016llx\n", size, offset);
 
 	return 0;
@@ -241,7 +235,6 @@ static int r8169_rx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 
 	r8169_rx_refill(pkt_r8169, 0, NUM_RX_DESC);
 
-	pkt_r8169->rx_queue_len = size;
 	pkt_r8169->capa.max_input_queues++;
 
 	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
@@ -269,7 +262,6 @@ static int r8169_tx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 		return -1;
 	}
 
-	pkt_r8169->tx_queue_len = size;
 	pkt_r8169->capa.max_output_queues++;
 
 	ODP_DBG("Register TX queue region: 0x%llx@%016llx\n", size, offset);
@@ -367,12 +359,6 @@ static int r8169_close(pktio_entry_t *pktio_entry)
 		iomem_free_dma(&pkt_r8169->mdev, &pkt_r8169->tx_data);
 	if (pkt_r8169->rx_data.vaddr)
 		iomem_free_dma(&pkt_r8169->mdev, &pkt_r8169->rx_data);
-	if (pkt_r8169->tx_descs)
-		munmap(pkt_r8169->tx_descs, pkt_r8169->tx_queue_len);
-	if (pkt_r8169->rx_descs)
-		munmap(pkt_r8169->rx_descs, pkt_r8169->rx_queue_len);
-	if (pkt_r8169->mmio)
-		munmap(pkt_r8169->mmio, pkt_r8169->mmio_len);
 
 	return 0;
 }

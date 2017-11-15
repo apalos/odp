@@ -7,6 +7,8 @@
 #include <mm_api.h>
 
 typedef struct {
+	char if_name[IF_NAMESIZE];	/**< Interface name */
+
 	int container;
 	int group;
 	int device;
@@ -17,7 +19,11 @@ typedef struct {
 	uint8_t *iobase;
 	uint8_t *iocur;
 
-	char if_name[IF_NAMESIZE];	/**< Interface name */
+	struct {
+		uint8_t *addr;
+		size_t size;
+	} mappings[256];
+	uint16_t mappings_count;
 } mdev_device_t;
 
 typedef int (*mdev_region_info_cb_t)(mdev_device_t *,

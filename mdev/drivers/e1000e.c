@@ -102,7 +102,6 @@ typedef union {
 
 /** Packet socket using mediated e1000e device */
 typedef struct {
-	/* TODO: cache align everything when we have profiling information */
 	odp_pool_t pool;		/**< pool to alloc packets from */
 
 	/* volatile void *mmio; */
@@ -114,7 +113,6 @@ typedef struct {
 	e1000e_rx_desc_t *rx_descs;	/**< RX queue mmap */
 	struct iomem rx_data;		/**< RX packet payload mmap */
 	uint16_t rx_next;		/**< next entry in RX queue to use */
-	// rx_tail, rx_head ? (mmio + offset)
 
 	/* TX queue hot data */
 	odp_bool_t lockless_tx;		/**< no locking for TX */
@@ -122,13 +120,8 @@ typedef struct {
 	e1000e_tx_desc_t *tx_descs;	/**< TX queue mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
 	uint16_t tx_next;		/**< next entry in TX queue to use */
-	// tx_tail, tx_head ? (mmio + offset)
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
-
-	size_t mmio_len;		/**< MMIO region length */
-	size_t rx_queue_len;		/**< Rx queue region length */
-	size_t tx_queue_len;		/**< Tx queue region length */
 
 	mdev_device_t mdev;		/**< Common mdev data */
 } pktio_ops_e1000e_data_t;
@@ -150,8 +143,6 @@ static int e1000e_mmio_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 		ODP_ERR("Cannot mmap MMIO\n");
 		return -1;
 	}
-
-	pkt_e1000e->mmio_len = size;
 
 	ODP_DBG("Register MMIO region: 0x%llx@%016llx\n", size, offset);
 
@@ -180,7 +171,6 @@ static int e1000e_rx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 
 	e1000e_rx_refill(pkt_e1000e, 0, E1000E_RX_QUEUE_SIZE_DEFAULT - 1);
 
-	pkt_e1000e->rx_queue_len = size;
 	pkt_e1000e->capa.max_input_queues++;
 
 	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
@@ -208,7 +198,6 @@ static int e1000e_tx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 		return -1;
 	}
 
-	pkt_e1000e->tx_queue_len = size;
 	pkt_e1000e->capa.max_output_queues++;
 
 	ODP_DBG("Register TX queue region: 0x%llx@%016llx\n", size, offset);
@@ -307,12 +296,6 @@ static int e1000e_close(pktio_entry_t *pktio_entry)
 		iomem_free_dma(&pkt_e1000e->mdev, &pkt_e1000e->tx_data);
 	if (pkt_e1000e->rx_data.vaddr)
 		iomem_free_dma(&pkt_e1000e->mdev, &pkt_e1000e->rx_data);
-	if (pkt_e1000e->tx_descs)
-		munmap(pkt_e1000e->tx_descs, pkt_e1000e->tx_queue_len);
-	if (pkt_e1000e->rx_descs)
-		munmap(pkt_e1000e->rx_descs, pkt_e1000e->rx_queue_len);
-	if (pkt_e1000e->mmio)
-		munmap(pkt_e1000e->mmio, pkt_e1000e->mmio_len);
 
 	return 0;
 }
