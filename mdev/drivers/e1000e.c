@@ -416,7 +416,7 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	if (budget > num)
 		budget = num;
 
-	while (budget) {
+	while (tx_pkts < budget) {
 		volatile e1000e_tx_desc_t *txd =
 		    &pkt_e1000e->tx_descs[pkt_e1000e->tx_next];
 		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
@@ -442,7 +442,6 @@ static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 			pkt_e1000e->tx_next = 0;
 
 		tx_pkts++;
-		budget--;
 	}
 
 	dma_wmb();
@@ -488,6 +487,7 @@ static pktio_ops_module_t e1000e_pktio_ops = {
 
 	.recv = e1000e_recv,
 	.send = e1000e_send,
+
 	.link_status = e1000e_link_status,
 };
 
