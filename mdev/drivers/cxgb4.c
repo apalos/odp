@@ -106,7 +106,11 @@ typedef struct {
 } cxgb4_fw_eth_tx_pkt_wr_t;
 
 typedef struct {
-#define CPL_TX_PKT_XT 0xEE000000UL
+#define CPL_TX_PKT_XT	0xEE000000UL
+#define TXPKT_PF_S	8
+#define TXPKT_PF_V(x)	((x) << TXPKT_PF_S)
+#define TXPKT_INTF_S	16
+#define TXPKT_INTF_V(x)	((x) << TXPKT_INTF_S)
 	odpdrv_u32be_t ctrl0;
 	odpdrv_u16be_t pack;
 	odpdrv_u16be_t len;
@@ -164,8 +168,13 @@ typedef struct {
 	odp_ticketlock_t tx_locks[CXGB4_TX_QUEUE_NUM_MAX];
 
 	odp_pool_t pool;		/**< pool to alloc packets from */
+
 	odp_bool_t lockless_rx;		/**< no locking for RX */
+	uint16_t free_list_align;	/**< Alignment required for RX chunks */
+
 	odp_bool_t lockless_tx;		/**< no locking for TX */
+	uint8_t tx_channel;		/**< TX channel of the interface */
+	uint8_t phys_function;		/**< Physical function of the interface */
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
@@ -198,27 +207,44 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 				   uint64_t offset, uint64_t size,
 				   uint64_t free_list_offset)
 {
-	cxgb4_rx_queue_t *rxq =
-	    &pkt_cxgb4->rx_queues[pkt_cxgb4->capa.max_input_queues++];
-	uint32_t doorbell_offset = 0;	/* TODO: sysfs */
-	uint32_t qhandle = 0;	/* TODO: sysfs */
+	uint16_t rxq_idx = pkt_cxgb4->capa.max_input_queues++;
+	cxgb4_rx_queue_t *rxq = &pkt_cxgb4->rx_queues[rxq_idx];
+	uint32_t doorbell_offset;
 	struct iomem rx_data;
+	char path[2048];
 	int ret;
 
-	ODP_ASSERT(pkt_cxgb4->capa.max_input_queues <=
-		   ARRAY_SIZE(pkt_cxgb4->rx_queues));
+	ODP_ASSERT(rxq_idx <= ARRAY_SIZE(pkt_cxgb4->rx_queues));
 
-	rxq->doorbell = (odpdrv_u32be_t *) (pkt_cxgb4->mmio + doorbell_offset);
-	rxq->qhandle = qhandle;
+	memset(path, 0, sizeof(path));
 
 	rxq->rx_queue_len = 1024; /* TODO: ethtool_ringparam.rx_mini_pending */
 	rxq->free_list_len = 72; /* TODO: ethtool_ringparam.rx_pending + 8 */
+
+	snprintf(path, sizeof(path) - 1, "queues/rx-%u/doorbell_offset",
+		 rxq_idx);
+	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &doorbell_offset) < 0) {
+		ODP_ERR("Cannot get %s\n", path);
+		return -1;
+	}
+	rxq->doorbell = (odpdrv_u32be_t *)(pkt_cxgb4->mmio + doorbell_offset);
+
+	snprintf(path, sizeof(path) - 1, "queues/rx-%u/qhandle", rxq_idx);
+	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &rxq->qhandle) < 0) {
+		ODP_ERR("Cannot get %s\n", path);
+		return -1;
+	}
+
+	ODP_ASSERT(rxq->rx_queue_len * sizeof(*rxq->rx_descs) <= size);
 
 	rxq->rx_descs = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
 	if (rxq->rx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap TX queue\n");
 		return -1;
 	}
+
+	ODP_ASSERT(rxq->free_list_len * sizeof(*rxq->free_list) <=
+		   ODP_PAGE_SIZE);
 
 	rxq->free_list =
 	    mdev_region_mmap(&pkt_cxgb4->mdev, free_list_offset, ODP_PAGE_SIZE);
@@ -251,20 +277,35 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
 				   uint64_t offset, uint64_t size)
 {
-	cxgb4_tx_queue_t *txq =
-	    &pkt_cxgb4->tx_queues[pkt_cxgb4->capa.max_output_queues++];
-	uint32_t doorbell_offset = 0;	/* TODO: sysfs */
-	uint32_t qhandle = 0;	/* TODO: sysfs */
+	uint16_t txq_idx = pkt_cxgb4->capa.max_output_queues++;
+	cxgb4_tx_queue_t *txq = &pkt_cxgb4->tx_queues[txq_idx];
+	uint32_t doorbell_offset;
 	struct iomem tx_data;
+	char path[2048];
 	int ret;
 
-	ODP_ASSERT(pkt_cxgb4->capa.max_output_queues <=
-		   ARRAY_SIZE(pkt_cxgb4->tx_queues));
+	ODP_ASSERT(txq_idx <= ARRAY_SIZE(pkt_cxgb4->tx_queues));
 
-	txq->doorbell = (odpdrv_u32be_t *) (pkt_cxgb4->mmio + doorbell_offset);
-	txq->qhandle = qhandle;
+	memset(path, 0, sizeof(path));
 
 	txq->tx_queue_len = 1024; /* TODO: ethtool_ringparam.tx_pending */
+
+	snprintf(path, sizeof(path) - 1, "queues/tx-%u/doorbell_offset",
+		 txq_idx);
+	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &doorbell_offset) < 0) {
+		ODP_ERR("Cannot get %s\n", path);
+		return -1;
+	}
+	txq->doorbell = (odpdrv_u32be_t *)(pkt_cxgb4->mmio + doorbell_offset);
+
+	snprintf(path, sizeof(path) - 1, "queues/tx-%u/qhandle", txq_idx);
+	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &txq->qhandle) < 0) {
+		ODP_ERR("Cannot get %s\n", path);
+		return -1;
+	}
+
+	ODP_ASSERT(txq->tx_queue_len * sizeof(*txq->tx_descs) +
+		   sizeof(*txq->stats) <= size);
 
 	txq->tx_descs = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
 	if (txq->tx_descs == MAP_FAILED) {
@@ -337,6 +378,24 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 	for (uint32_t i = 0; i < ARRAY_SIZE(pkt_cxgb4->tx_locks); i++)
 		odp_ticketlock_init(&pkt_cxgb4->tx_locks[i]);
 
+	if (mdev_attr_u16_get(&pkt_cxgb4->mdev,
+	     "free_list_align", &pkt_cxgb4->free_list_align) < 0) {
+		ODP_ERR("Cannot get %s\n", "free_list_align");
+		goto out;
+	}
+
+	if (mdev_attr_u8_get(&pkt_cxgb4->mdev,
+	     "tx_channel", &pkt_cxgb4->tx_channel) < 0) {
+		ODP_ERR("Cannot get %s\n", "tx_channel");
+		goto out;
+	}
+
+	if (mdev_attr_u8_get(&pkt_cxgb4->mdev,
+	     "phys_function", &pkt_cxgb4->phys_function) < 0) {
+		ODP_ERR("Cannot get %s\n", "phys_function");
+		goto out;
+	}
+
 	cxgb4_wait_link_up(pktio_entry);
 
 	ODP_DBG("%s: open %s is successful\n", MODULE_NAME,
@@ -346,7 +405,6 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 
 out:
 	cxgb4_close(pktio_entry);
-
 	return -1;
 }
 
@@ -464,8 +522,7 @@ static int cxgb4_recv(pktio_entry_t * pktio_entry,
 
 			offset += len;
 
-			/* TODO: fl_align shall be in capabilities */
-			rxq->offset += ROUNDUP_ALIGN(len, 64);
+			rxq->offset += ROUNDUP_ALIGN(len, pkt_cxgb4->free_list_align);
 
 			ODP_ASSERT(rxq->offset <= ODP_PAGE_SIZE);
 
@@ -560,9 +617,9 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 		wr->equiq_to_len16 = odpdrv_cpu_to_be_32(3);
 		wr->r3 = odpdrv_cpu_to_be_64(0);
 
-		// TODO: ctrl0 = TXPKT_OPCODE_V(CPL_TX_PKT_XT) | TXPKT_INTF_V(pi->tx_chan) | TXPKT_PF_V(adap->pf);
-		// TODO: at least put in hardcoded tx_chan and pf values in here.
-		cpl->ctrl0 = odpdrv_cpu_to_be_32(CPL_TX_PKT_XT);
+		cpl->ctrl0 = odpdrv_cpu_to_be_32(CPL_TX_PKT_XT |
+				TXPKT_INTF_V(pkt_cxgb4->tx_channel) |
+				TXPKT_PF_V(pkt_cxgb4->phys_function));
 		cpl->pack = odpdrv_cpu_to_be_16(0);
 		cpl->len = odpdrv_cpu_to_be_16(pkt_len);
 		cpl->ctrl1 =
