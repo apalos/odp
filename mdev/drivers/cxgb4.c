@@ -417,6 +417,34 @@ static int cxgb4_close(pktio_entry_t *pktio_entry)
 
 	mdev_device_destroy(&pkt_cxgb4->mdev);
 
+	for (uint16_t i = 0; i < pkt_cxgb4->capa.max_input_queues; i++) {
+		cxgb4_rx_queue_t *rxq = &pkt_cxgb4->rx_queues[i];
+
+		if (rxq->rx_data_size) {
+			struct iomem rx_data;
+
+			rx_data.vaddr = rxq->rx_data_base;
+			rx_data.iova = rxq->rx_data_iova;
+			rx_data.size = rxq->rx_data_size;
+
+			iomem_free_dma(&pkt_cxgb4->mdev, &rx_data);
+		}
+	}
+
+	for (uint16_t i = 0; i < pkt_cxgb4->capa.max_output_queues; i++) {
+		cxgb4_tx_queue_t *txq = &pkt_cxgb4->tx_queues[i];
+
+		if (txq->tx_data_size) {
+			struct iomem tx_data;
+
+			tx_data.vaddr = txq->tx_data_base;
+			tx_data.iova = txq->tx_data_iova;
+			tx_data.size = txq->tx_data_size;
+
+			iomem_free_dma(&pkt_cxgb4->mdev, &tx_data);
+		}
+	}
+
 	return 0;
 }
 
