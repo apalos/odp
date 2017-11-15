@@ -33,6 +33,9 @@ int iomem_alloc_dma(mdev_device_t *mdev, struct iomem *iomem);
 int iomem_free_dma(mdev_device_t *mdev, struct iomem *iomem);
 
 int mdev_attr_get(mdev_device_t *mdev, const char *attr, char *buf);
+int mdev_attr_u64_get(mdev_device_t *mdev, const char *attr, uint64_t *val);
 int mdev_attr_u32_get(mdev_device_t *mdev, const char *attr, uint32_t *val);
+int mdev_attr_u16_get(mdev_device_t *mdev, const char *attr, uint16_t *val);
+int mdev_attr_u8_get(mdev_device_t *mdev, const char *attr, uint8_t *val);
 
 #endif

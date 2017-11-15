@@ -501,7 +501,7 @@ int mdev_attr_get(mdev_device_t *mdev, const char *attr, char *buf)
 	return mdev_sysfs_attr_get(sysfs_path, buf);
 }
 
-int mdev_attr_u32_get(mdev_device_t *mdev, const char *attr, uint32_t *val)
+int mdev_attr_u64_get(mdev_device_t *mdev, const char *attr, uint64_t *val)
 {
 	char buf[ODP_PAGE_SIZE];
 	char *endptr;
@@ -512,9 +512,54 @@ int mdev_attr_u32_get(mdev_device_t *mdev, const char *attr, uint32_t *val)
 	if (*buf == '\0')
 		return -1;
 
-	*val = strtoul(buf, &endptr, 0);
+	*val = strtoull(buf, &endptr, 0);
 	if (*endptr != '\0')
 		return -1;
+
+	return 0;
+}
+
+int mdev_attr_u32_get(mdev_device_t *mdev, const char *attr, uint32_t *val)
+{
+	uint64_t raw;
+
+	if (mdev_attr_u64_get(mdev, attr, &raw) < 0)
+		return -1;
+
+	if (raw > UINT32_MAX)
+		return -1;
+
+	*val = raw;
+
+	return 0;
+}
+
+int mdev_attr_u16_get(mdev_device_t *mdev, const char *attr, uint16_t *val)
+{
+	uint64_t raw;
+
+	if (mdev_attr_u64_get(mdev, attr, &raw) < 0)
+		return -1;
+
+	if (raw > UINT16_MAX)
+		return -1;
+
+	*val = raw;
+
+	return 0;
+}
+
+int mdev_attr_u8_get(mdev_device_t *mdev, const char *attr, uint8_t *val)
+{
+	uint64_t raw;
+
+	if (mdev_attr_u64_get(mdev, attr, &raw) < 0)
+		return -1;
+
+	if (raw > UINT8_MAX)
+		return -1;
+
+	*val = raw;
 
 	return 0;
 }
