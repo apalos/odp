@@ -1,5 +1,6 @@
 #include <odp_posix_extensions.h>
 #include <stdio.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <libgen.h>
 #include <string.h>
@@ -99,4 +100,30 @@ int mdev_sysfs_discover(const char *mod_name, const char *if_name, char *uuid,
 	ret = atoi(iommu_group);
 
 	return ret;
+}
+
+int mdev_sysfs_attr_get(const char *path, char *buf)
+{
+	int fd;
+
+	fd = open(path, O_RDONLY);
+	if (fd < 0) {
+		ODP_ERR("Can't open sysfs attribute %s\n", path);
+		goto fail;
+	}
+
+	/* Play safe, make sure the attr value is zero terminated */
+	memset(buf, 0, ODP_PAGE_SIZE);
+
+	if (read(fd, buf, ODP_PAGE_SIZE - 1) <= 0) {
+		ODP_ERR("Can't open sysfs attribute %s\n", path);
+		goto fail;
+	}
+
+	return 0;
+
+fail:
+	if (fd >= 0)
+		close(fd);
+	return -1;
 }

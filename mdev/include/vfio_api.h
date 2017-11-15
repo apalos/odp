@@ -32,4 +32,7 @@ void *mdev_region_mmap(mdev_device_t *mdev, uint64_t offset, uint64_t size);
 int iomem_alloc_dma(mdev_device_t *mdev, struct iomem *iomem);
 int iomem_free_dma(mdev_device_t *mdev, struct iomem *iomem);
 
+int mdev_attr_get(mdev_device_t *mdev, const char *attr, char *buf);
+int mdev_attr_u32_get(mdev_device_t *mdev, const char *attr, uint32_t *val);
+
 #endif

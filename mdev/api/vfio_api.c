@@ -489,3 +489,32 @@ void mdev_device_destroy(mdev_device_t *mdev ODP_UNUSED)
 	if (mdev->iobase)
 		iomem_free(mdev->iobase);
 }
+
+int mdev_attr_get(mdev_device_t *mdev, const char *attr, char *buf)
+{
+	char sysfs_path[2048];
+
+	snprintf(sysfs_path, sizeof(sysfs_path) - 1, "/sys/class/net/%s/%s",
+		 mdev->if_name, attr);
+	sysfs_path[sizeof(sysfs_path) - 1] = '\0';
+
+	return mdev_sysfs_attr_get(sysfs_path, buf);
+}
+
+int mdev_attr_u32_get(mdev_device_t *mdev, const char *attr, uint32_t *val)
+{
+	char buf[ODP_PAGE_SIZE];
+	char *endptr;
+
+	if (mdev_attr_get(mdev, attr, buf) < 0)
+		return -1;
+
+	if (*buf == '\0')
+		return -1;
+
+	*val = strtoul(buf, &endptr, 0);
+	if (*endptr != '\0')
+		return -1;
+
+	return 0;
+}

@@ -6,4 +6,6 @@
 int mdev_sysfs_discover(const char *mod_name, const char *if_name, char *uuid,
 			size_t sz);
 
+int mdev_sysfs_attr_get(const char *path, char *buf);
+
 #endif
