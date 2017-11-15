@@ -211,8 +211,8 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	rxq->doorbell = (odpdrv_u32be_t *) (pkt_cxgb4->mmio + doorbell_offset);
 	rxq->qhandle = qhandle;
 
-	rxq->rx_queue_len = 1024; /* TODO: ethtool */
-	rxq->free_list_len = 72; /* TODO: sysfs */
+	rxq->rx_queue_len = 1024; /* TODO: ethtool_ringparam.rx_mini_pending */
+	rxq->free_list_len = 72; /* TODO: ethtool_ringparam.rx_pending + 8 */
 
 	rxq->rx_descs = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
 	if (rxq->rx_descs == MAP_FAILED) {
@@ -227,7 +227,7 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 		return -1;
 	}
 
-	rx_data.size = 2 * 1024 * 1024;
+	rx_data.size = rxq->free_list_len * ODP_PAGE_SIZE;
 	ret = iomem_alloc_dma(&pkt_cxgb4->mdev, &rx_data);
 	if (ret) {
 		ODP_ERR("Cannot allocate TX queue DMA area\n");
@@ -264,7 +264,7 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
 	txq->doorbell = (odpdrv_u32be_t *) (pkt_cxgb4->mmio + doorbell_offset);
 	txq->qhandle = qhandle;
 
-	txq->tx_queue_len = 1024; /* TODO: ethtool */
+	txq->tx_queue_len = 1024; /* TODO: ethtool_ringparam.tx_pending */
 
 	txq->tx_descs = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
 	if (txq->tx_descs == MAP_FAILED) {
@@ -274,7 +274,7 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
 
 	txq->stats = (cxgb4_tx_queue_stats *)(txq->tx_descs + txq->tx_queue_len);
 
-	tx_data.size = 2 * 1024 * 1024;
+	tx_data.size = txq->tx_queue_len * CXGB4_TX_BUF_SIZE;
 	ret = iomem_alloc_dma(&pkt_cxgb4->mdev, &tx_data);
 	if (ret) {
 		ODP_ERR("Cannot allocate TX queue DMA area\n");

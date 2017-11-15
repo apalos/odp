@@ -27,9 +27,6 @@
 
 #define MODULE_NAME "r8169"
 
-#define NUM_TX_DESC	64	/* Number of Tx descriptors */
-#define NUM_RX_DESC	256U	/* Number of Rx descriptors */
-
 #define R8169_RX_BUF_SIZE	2048U
 #define R8169_TX_BUF_SIZE	2048U
 
@@ -63,6 +60,7 @@ typedef struct {
 	r8169_rx_desc_t *rx_descs;	/**< RX queue mmap */
 	struct iomem rx_data;		/**< RX packet payload mmap */
 	uint16_t rx_next;		/**< next entry in RX queue to use */
+	uint16_t rx_queue_len;		/**< Number of RX desc entries */
 
 	/* TX queue hot data */
 	odp_bool_t lockless_tx;		/**< no locking for TX */
@@ -70,6 +68,7 @@ typedef struct {
 	r8169_tx_desc_t *tx_descs;	/**< TX queue mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
 	uint16_t tx_next;		/**< next entry in TX queue to use */
+	uint16_t tx_queue_len;		/**< Number of TX desc entries */
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
 
@@ -92,19 +91,21 @@ static void r8169_flood(pktio_entry_t *pktio_entry)
 
 	while (1) {
 		tx_pkts = 0;
-		while (tx_pkts < NUM_TX_DESC) {
+		while (tx_pkts < pkt_r8169->tx_queue_len) {
 			volatile r8169_tx_desc_t *txd =
-				&pkt_r8169->tx_descs[pkt_r8169->tx_next];
+			    &pkt_r8169->tx_descs[pkt_r8169->tx_next];
 			uint32_t pkt_len = 46;
-			uint32_t offset = pkt_r8169->tx_next * R8169_TX_BUF_SIZE;
+			uint32_t offset =
+			    pkt_r8169->tx_next * R8169_TX_BUF_SIZE;
 			uint32_t opts[2];
 			uint32_t status;
 
 			status = odpdrv_le_to_cpu_32(txd->opts1);
 			if (status & DescOwn)
 				break;
-			txd->addr = odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova +
-							    offset);
+			txd->addr =
+			    odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova +
+						offset);
 			/* FIXME no fragmentation support */
 			opts[0] = DescOwn;
 			opts[0] |= FirstFrag | LastFrag;
@@ -112,10 +113,13 @@ static void r8169_flood(pktio_entry_t *pktio_entry)
 			opts[1] = 0;
 
 			pkt_r8169->tx_next++;
-			if (odp_unlikely(pkt_r8169->tx_next >= NUM_TX_DESC))
+			if (odp_unlikely
+			    (pkt_r8169->tx_next >= pkt_r8169->tx_queue_len))
 				pkt_r8169->tx_next = 0;
 
-			status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->tx_next));
+			status =
+			    opts[0] | pkt_len | (RingEnd *
+						 !(pkt_r8169->tx_next));
 
 			txd->opts1 = odpdrv_cpu_to_le_32(status);
 			txd->opts2 = odpdrv_cpu_to_le_32(opts[1]);
@@ -169,7 +173,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		opts[1] = 0;
 
 		pkt_r8169->tx_next++;
-		if (odp_unlikely(pkt_r8169->tx_next >= NUM_TX_DESC))
+		if (odp_unlikely(pkt_r8169->tx_next >= pkt_r8169->tx_queue_len))
 			pkt_r8169->tx_next = 0;
 
 		status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->tx_next));
@@ -220,20 +224,22 @@ static int r8169_rx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 
 	ODP_ASSERT(pkt_r8169->capa.max_input_queues == 0);
 
+	pkt_r8169->rx_queue_len = 256; /* TODO: ethtool_ringparam.rx_pending */
+
 	pkt_r8169->rx_descs = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
 	if (pkt_r8169->rx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap RX queue\n");
 		return -1;
 	}
 
-	pkt_r8169->rx_data.size = 2 * 1024 * 1024;
+	pkt_r8169->rx_data.size = pkt_r8169->rx_queue_len * R8169_RX_BUF_SIZE;
 	ret = iomem_alloc_dma(&pkt_r8169->mdev, &pkt_r8169->rx_data);
 	if (ret) {
 		ODP_ERR("Cannot allocate RX queue DMA area\n");
 		return -1;
 	}
 
-	r8169_rx_refill(pkt_r8169, 0, NUM_RX_DESC);
+	r8169_rx_refill(pkt_r8169, 0, pkt_r8169->rx_queue_len);
 
 	pkt_r8169->capa.max_input_queues++;
 
@@ -249,13 +255,15 @@ static int r8169_tx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 
 	ODP_ASSERT(pkt_r8169->capa.max_output_queues == 0);
 
+	pkt_r8169->tx_queue_len = 64; /* TODO: ethtool_ringparam.tx_pending */
+
 	pkt_r8169->tx_descs = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
 	if (pkt_r8169->tx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap TX queue\n");
 		return -1;
 	}
 
-	pkt_r8169->tx_data.size = 2 * 1024 * 1024;
+	pkt_r8169->tx_data.size = pkt_r8169->tx_queue_len * R8169_TX_BUF_SIZE;
 	ret = iomem_alloc_dma(&pkt_r8169->mdev, &pkt_r8169->tx_data);
 	if (ret) {
 		ODP_ERR("Cannot allocate TX queue DMA area\n");
@@ -368,7 +376,7 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 {
 	uint16_t i = from;
 
-	ODP_ASSERT(num <= NUM_RX_DESC);
+	ODP_ASSERT(num <= pkt_r8169->rx_queue_len);
 
 	while (num) {
 		r8169_rx_desc_t *rxd = &pkt_r8169->rx_descs[i];
@@ -379,7 +387,7 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 		    odpdrv_cpu_to_le_64(pkt_r8169->rx_data.iova + offset);
 		rxd->opts2 = odpdrv_cpu_to_le_32(0);
 
-		if (odp_likely(i < NUM_RX_DESC - 1)) {
+		if (odp_likely(i < pkt_r8169->rx_queue_len - 1)) {
 			opts1 = DescOwn | R8169_RX_BUF_SIZE;
 			i++;
 		} else {
@@ -445,7 +453,7 @@ static int r8169_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
 		pkt_hdr->input = pktio_entry->s.handle;
 
 		pkt_r8169->rx_next++;
-		if (odp_unlikely(pkt_r8169->rx_next >= NUM_RX_DESC))
+		if (odp_unlikely(pkt_r8169->rx_next >= pkt_r8169->rx_queue_len))
 			pkt_r8169->rx_next = 0;
 
 		pkt_table[rx_pkts] = pkt;
