@@ -435,15 +435,14 @@ static int cxgb4_recv(pktio_entry_t * pktio_entry,
 		 * next one from the beginning.
 		 */
 		if (pkt_len & RX_DESC_NEW_BUF_FLAG) {
-			rxq->offset = 0;
-
 			rxq->cidx++;
 			if (odp_unlikely(rxq->cidx >= rxq->free_list_len))
 				rxq->cidx = 0;
 
-			pkt_len ^= RX_DESC_NEW_BUF_FLAG;
-
+			rxq->offset = 0;
 			refill_count++;
+
+			pkt_len ^= RX_DESC_NEW_BUF_FLAG;
 		}
 
 		/*
@@ -471,15 +470,21 @@ static int cxgb4_recv(pktio_entry_t * pktio_entry,
 
 			offset += len;
 
-			rxq->cidx++;
-			if (odp_unlikely(rxq->cidx >= rxq->free_list_len))
-				rxq->cidx = 0;
+			/* TODO: fl_align shall be in capabilities */
+			rxq->offset += ROUNDUP_ALIGN(len, 64);
 
-			rxq->offset = 0;
+			ODP_ASSERT(rxq->offset <= ODP_PAGE_SIZE);
+
+			if (rxq->offset >= ODP_PAGE_SIZE)
+			{
+				rxq->cidx++;
+				if (odp_unlikely(rxq->cidx >= rxq->free_list_len))
+					rxq->cidx = 0;
+
+				rxq->offset = 0;
+				refill_count++;
+			}
 		}
-
-		/* TODO: fl_align shall be in capabilities */
-		rxq->offset = ROUNDUP_ALIGN(rxq->offset, 64);
 
 		rxq->rx_next++;
 		if (odp_unlikely(rxq->rx_next >= rxq->rx_queue_len)) {
