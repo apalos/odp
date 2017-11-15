@@ -585,7 +585,7 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 	if (budget > num)
 		budget = num;
 
-	while (budget) {
+	while (tx_pkts < budget) {
 		volatile cxgb4_tx_desc_t *txd = &txq->tx_descs[txq->tx_next];
 		uint32_t offset = txq->tx_next * CXGB4_TX_BUF_SIZE;
 		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
@@ -635,7 +635,6 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 			txq->tx_next = 0;
 
 		tx_pkts++;
-		budget--;
 	}
 
 	/* Ring the doorbell */
@@ -674,6 +673,7 @@ static pktio_ops_module_t cxgb4_pktio_ops = {
 
 	.recv = cxgb4_recv,
 	.send = cxgb4_send,
+
 	.link_status = cxgb4_link_status,
 };
 
