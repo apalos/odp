@@ -225,7 +225,14 @@ static struct vfio_region_info *vfio_get_region(mdev_device_t *mdev, __u32 regio
 	}
 
 	if (region_info->argsz > sizeof(*region_info)) {
-		region_info = realloc(region_info, region_info->argsz);
+		struct vfio_region_info *tmp;
+
+		tmp = realloc(region_info, region_info->argsz);
+		if (!tmp)
+			goto out;
+
+		region_info = tmp;
+
 		ODP_DBG("region info %d with extended capabilities size: %u\n",
 			region, region_info->argsz);
 		ret = ioctl(mdev->device, VFIO_DEVICE_GET_REGION_INFO, region_info);
@@ -236,6 +243,7 @@ static struct vfio_region_info *vfio_get_region(mdev_device_t *mdev, __u32 regio
 	}
 
 	return region_info;
+
 out:
 	if (region_info)
 		free(region_info);
