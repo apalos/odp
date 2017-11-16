@@ -154,23 +154,22 @@ int vfio_get_region_sparse_mmaps(struct vfio_region_info *region_info,
 				 struct vfio_region_info_cap_sparse_mmap **sparse)
 {
 	struct vfio_info_cap_header *caps = NULL;
-	int ret = 0;
-	uint32_t i;
+	int ret = -ENOENT;
 
 	if (region_info->flags & VFIO_REGION_INFO_FLAG_CAPS &&
 	    region_info->argsz > sizeof(*region_info)) {
 		caps = vfio_get_cap_info(region_info,
 					 VFIO_REGION_INFO_CAP_SPARSE_MMAP);
-		if (!caps) {
-			ret = -EINVAL;
+		if (!caps)
 			goto out;
-		}
 		vfio_find_sparse_mmaps(caps, sparse);
 		if (*sparse) {
-			for (i = 0; i < (*sparse)->nr_areas; i++)
+			for (uint32_t i = 0; i < (*sparse)->nr_areas; i++)
 				ODP_DBG("Sparse region: %d 0x%llx %llu\n", i,
 				(*sparse)->areas[i].offset, (*sparse)->areas[i].size);
 		}
+
+		ret = 0;
 	}
 
 out:
