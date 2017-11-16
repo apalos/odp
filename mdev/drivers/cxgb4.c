@@ -335,17 +335,54 @@ static int cxgb4_region_info_cb(mdev_device_t *mdev,
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 =
 	    odp_container_of(mdev, pktio_ops_cxgb4_data_t, mdev);
-	int ret;
+	mdev_region_class_t class_info;
 
-	/* TODO: parse region_info and call relevant hook */
-	ret =
-	    cxgb4_mmio_register(pkt_cxgb4, region_info->offset,
-				region_info->size);
+	if (vfio_get_region_cap_type(region_info, &class_info) < 0) {
+		ODP_ERR("Cannot find class_info in region %u\n",
+			region_info->index);
+		return -1;
+	}
 
-	ret = cxgb4_rx_queue_register(pkt_cxgb4, 0, 0, 0);
-	ret = cxgb4_tx_queue_register(pkt_cxgb4, 0, 0);
+	switch (class_info.type) {
+	case VFIO_NET_MMIO:
+		return cxgb4_mmio_register(pkt_cxgb4,
+					   region_info->offset,
+					   region_info->size);
 
-	return ret;
+	case VFIO_NET_DESCRIPTORS:
+		if (class_info.subtype == VFIO_NET_MDEV_RX) {
+			struct vfio_region_info_cap_sparse_mmap *sparse;
+			if (vfio_get_region_sparse_mmaps(region_info, &sparse) < 0) {
+				ODP_ERR("RX queue in region %u: no free list\n",
+					region_info->index);
+				return -1;
+			}
+
+			if (sparse->nr_areas != 1) {
+				ODP_ERR("RX queue in region %u: corrupt free list\n",
+				        region_info->index);
+				return -1;
+			}
+
+			ODP_ASSERT(sparse->areas[0].size == ODP_PAGE_SIZE);
+
+			return cxgb4_rx_queue_register(pkt_cxgb4,
+						       region_info->offset,
+						       region_info->size,
+						       sparse->areas[0].offset);
+		}
+		if (class_info.subtype == VFIO_NET_MDEV_TX)
+			return cxgb4_tx_queue_register(pkt_cxgb4,
+						       region_info->offset,
+						       region_info->size);
+		/* fallthrough */
+
+	default:
+		ODP_ERR("Unexpected region %u (class %u:%u)\n",
+			region_info->index, class_info.type,
+			class_info.subtype);
+		return -1;
+	}
 }
 
 static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
