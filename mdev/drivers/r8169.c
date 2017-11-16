@@ -232,35 +232,38 @@ static int r8169_region_info_cb(mdev_device_t *mdev,
 	pktio_ops_r8169_data_t *pkt_r8169 =
 	    odp_container_of(mdev, pktio_ops_r8169_data_t, mdev);
 	int ret;
+	mdev_region_class_t class_info;
 
-	/*
-	 * TODO: parse region_info capabilities instead of hardcoded region
-	 * index and call relevant hook
-	 */
-	switch (region_info->index) {
-	case 2:
+	ret = vfio_get_region_cap_type(region_info, &class_info);
+	if (ret < 0)
+		return ret;
+
+	switch (class_info.type) {
+	case VFIO_NET_MMIO:
 		ret =
 		    r8169_mmio_register(pkt_r8169, region_info->offset,
 					region_info->size);
 		break;
 
-	case VFIO_PCI_NUM_REGIONS + VFIO_NET_MDEV_RX_REGION_INDEX:
-		ret =
-		    r8169_rx_queue_register(pkt_r8169, region_info->offset,
-					    region_info->size);
-		break;
-
-	case VFIO_PCI_NUM_REGIONS + VFIO_NET_MDEV_TX_REGION_INDEX:
-		ret =
-		    r8169_tx_queue_register(pkt_r8169, region_info->offset,
-					    region_info->size);
+	case VFIO_NET_DESCRIPTORS:
+		if (class_info.subtype == VFIO_NET_MDEV_RX)
+			ret =
+				r8169_rx_queue_register(pkt_r8169, region_info->offset,
+							region_info->size);
+		else if (class_info.subtype == VFIO_NET_MDEV_TX)
+			ret =
+				r8169_tx_queue_register(pkt_r8169, region_info->offset,
+							region_info->size);
 		break;
 
 	default:
-		ODP_ERR("Unexpected region %u\n", region_info->index);
+		ODP_ERR("Unexpected region %u type: %d\n", region_info->index,
+			class_info.type);
 		ret = -1;
 		break;
 	}
+
+
 
 	return ret;
 }

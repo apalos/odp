@@ -208,32 +208,37 @@ static int e1000e_region_info_cb(mdev_device_t *mdev,
 	pktio_ops_e1000e_data_t *pkt_e1000e =
 	    odp_container_of(mdev, pktio_ops_e1000e_data_t, mdev);
 	int ret;
+	mdev_region_class_t class_info;
+
+	ret = vfio_get_region_cap_type(region_info, &class_info);
+	if (ret < 0)
+		return ret;
 
 	/*
 	 * TODO: parse region_info capabilities instead of hardcoded region
 	 * index and call relevant hook
 	 */
-	switch (region_info->index) {
-	case 0:
+	switch (class_info.type) {
+	case VFIO_NET_MMIO:
 		ret =
 		    e1000e_mmio_register(pkt_e1000e, region_info->offset,
 					 region_info->size);
 		break;
 
-	case VFIO_PCI_NUM_REGIONS + VFIO_NET_MDEV_RX_REGION_INDEX:
-		ret =
-		    e1000e_rx_queue_register(pkt_e1000e, region_info->offset,
-					     region_info->size);
-		break;
-
-	case VFIO_PCI_NUM_REGIONS + VFIO_NET_MDEV_TX_REGION_INDEX:
-		ret =
-		    e1000e_tx_queue_register(pkt_e1000e, region_info->offset,
-					     region_info->size);
+	case VFIO_NET_DESCRIPTORS:
+		if (class_info.subtype == VFIO_NET_MDEV_RX)
+			ret =
+				e1000e_rx_queue_register(pkt_e1000e, region_info->offset,
+							 region_info->size);
+		else if (class_info.subtype == VFIO_NET_MDEV_TX)
+			ret =
+				e1000e_tx_queue_register(pkt_e1000e, region_info->offset,
+							 region_info->size);
 		break;
 
 	default:
-		ODP_ERR("Unexpected region %u\n", region_info->index);
+		ODP_ERR("Unexpected region %u type: %d\n", region_info->index,
+			class_info.type);
 		ret = -1;
 		break;
 	}

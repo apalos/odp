@@ -7,6 +7,11 @@
 #include <mm_api.h>
 
 typedef struct {
+	__u16 type;
+	__u16 subtype;
+} mdev_region_class_t;
+
+typedef struct {
 	char if_name[IF_NAMESIZE];	/**< Interface name */
 
 	int container;
@@ -43,5 +48,11 @@ int mdev_attr_u64_get(mdev_device_t *mdev, const char *attr, uint64_t *val);
 int mdev_attr_u32_get(mdev_device_t *mdev, const char *attr, uint32_t *val);
 int mdev_attr_u16_get(mdev_device_t *mdev, const char *attr, uint16_t *val);
 int mdev_attr_u8_get(mdev_device_t *mdev, const char *attr, uint8_t *val);
+
+int vfio_get_region_cap_type(struct vfio_region_info *region_info,
+			     mdev_region_class_t *type_info);
+int vfio_get_region_sparse_mmaps(struct vfio_region_info *region_info,
+				 struct vfio_region_info_cap_sparse_mmap **sparse);
+
 
 #endif

@@ -35,14 +35,6 @@ static const char *vfio_fail_str[] = {
 	[VFIO_DEVICE_GET_REGION_INFO] = "Failed to get PCI region info",
 };
 
-static const struct cap_to_type_subtype {
-	__u32 type;
-	__u32 subtype;
-} tmatch[] = {
-	[VFIO_NET_MDEV_RX_REGION_INDEX] = { VFIO_NET_DESCRIPTORS, VFIO_NET_MDEV_RX },
-	[VFIO_NET_MDEV_TX_REGION_INDEX] = { VFIO_NET_DESCRIPTORS, VFIO_NET_MDEV_TX },
-};
-
 static void vfio_print_fail(unsigned int reason)
 {
 	if (reason > ARRAY_SIZE(vfio_fail_str))
@@ -123,22 +115,10 @@ out:
 	return ret;
 }
 
-static int vfio_match_caps(struct vfio_info_cap_header *hdr, __u32 type,
-			   __u32 subtype)
-{
-	struct vfio_region_info_cap_type *cap_type;
-
-	cap_type = odp_container_of(hdr, struct vfio_region_info_cap_type, header);
-
-	return !(cap_type->type == type && cap_type->subtype == subtype);
-}
-
-static int vfio_find_sparse_mmaps(struct vfio_info_cap_header *hdr,
+static void vfio_find_sparse_mmaps(struct vfio_info_cap_header *hdr,
 				  struct vfio_region_info_cap_sparse_mmap **sparse)
 {
 	*sparse = odp_container_of(hdr, struct vfio_region_info_cap_sparse_mmap, header);
-
-	return 0;
 }
 
 
@@ -152,7 +132,7 @@ static struct vfio_info_cap_header *vfio_get_region_info_cap(struct vfio_region_
 		return NULL;
 
 	for (hdr = (struct vfio_info_cap_header *)((char *)ptr + info->cap_offset);
-	     hdr != ptr; hdr = ((struct vfio_info_cap_header *)(char *)ptr + hdr->next)) {
+	     hdr != ptr; hdr = (struct vfio_info_cap_header *)((char *)ptr + hdr->next)) {
 		if (hdr->id == id)
 			return hdr;
 	}
@@ -160,102 +140,107 @@ static struct vfio_info_cap_header *vfio_get_region_info_cap(struct vfio_region_
 	return NULL;
 }
 
-static int vfio_get_region_sparse_mmaps(int device, struct vfio_region_info *region_info)
+static struct vfio_info_cap_header *vfio_get_cap_info(struct vfio_region_info *region_info,
+						      __u16 id)
 {
-	struct vfio_region_info *info;
 	struct vfio_info_cap_header *caps = NULL;
-	struct vfio_region_info_cap_sparse_mmap *sparse;
+
+	caps = vfio_get_region_info_cap(region_info, id);
+
+	return caps;
+}
+
+int vfio_get_region_sparse_mmaps(struct vfio_region_info *region_info,
+				 struct vfio_region_info_cap_sparse_mmap **sparse)
+{
+	struct vfio_info_cap_header *caps = NULL;
 	int ret = 0;
-	unsigned int i;
+	uint32_t i;
 
 	if (region_info->flags & VFIO_REGION_INFO_FLAG_CAPS &&
 	    region_info->argsz > sizeof(*region_info)) {
-		info = calloc(1, region_info->argsz);
-		if (!info)
-			return -EINVAL;
-		memcpy(info, region_info, region_info->argsz);
-		ret = ioctl(device, VFIO_DEVICE_GET_REGION_INFO, info);
-		if (ret < 0) {
-			free(info);
-			info = NULL;
-			return -EINVAL;
+		caps = vfio_get_cap_info(region_info,
+					 VFIO_REGION_INFO_CAP_SPARSE_MMAP);
+		if (!caps) {
+			ret = -EINVAL;
+			goto out;
 		}
-		caps = vfio_get_region_info_cap(info, VFIO_REGION_INFO_CAP_SPARSE_MMAP);
-		free(info);
-		info = NULL;
-		if (!caps)
-			ret = -ENODEV;
-		ret = vfio_find_sparse_mmaps(caps, &sparse);
-		for (i = 0; i < sparse->nr_areas; i++)
-			ODP_DBG("Sparse region: %d 0x%llx %llu\n", i,
-			       sparse->areas[i].offset, sparse->areas[i].size);
+		vfio_find_sparse_mmaps(caps, sparse);
+		if (*sparse) {
+			for (i = 0; i < (*sparse)->nr_areas; i++)
+				ODP_DBG("Sparse region: %d 0x%llx %llu\n", i,
+				(*sparse)->areas[i].offset, (*sparse)->areas[i].size);
+		}
 	}
 
+out:
 	return ret;
 }
 
-static int vfio_get_region_cap_type(int device, struct vfio_region_info *region_info)
+/** Match capability type
+ * returns 0 on succcess
+ */
+int vfio_get_region_cap_type(struct vfio_region_info *region_info,
+			     mdev_region_class_t *class_info)
 {
 	struct vfio_info_cap_header *caps = NULL;
-	struct vfio_region_info *info;
 	int ret = 0;
-	int extra_region;
+	struct vfio_region_info_cap_type *cap_type;
 
-	extra_region = region_info->index - VFIO_PCI_NUM_REGIONS;
 	if (region_info->flags & VFIO_REGION_INFO_FLAG_CAPS &&
 	    region_info->argsz > sizeof(*region_info)) {
-		info = calloc(1, region_info->argsz);
-		if (!info)
-			return -EINVAL;
-		memcpy(info, region_info, region_info->argsz);
-		ret = ioctl(device, VFIO_DEVICE_GET_REGION_INFO, info);
-		if (ret < 0) {
-			free(info);
-			info = NULL;
-			return -EINVAL;
+		caps = vfio_get_cap_info(region_info,
+					 VFIO_REGION_INFO_CAP_TYPE);
+		if (!caps) {
+			ret = -EINVAL;
+			goto out;
 		}
-		caps = vfio_get_region_info_cap(info, VFIO_REGION_INFO_CAP_TYPE);
-		free(info);
-		info = NULL;
-		if (!caps)
-			ret = -ENODEV;
-		ret = vfio_match_caps(caps, tmatch[extra_region].type,
-				      tmatch[extra_region].subtype);
-	}
 
+		cap_type = odp_container_of(caps, struct vfio_region_info_cap_type, header);
+		class_info->type = cap_type->type;
+		class_info->subtype = cap_type->subtype;
+	}
+out:
 	return ret;
 }
 
 /**
  * Get specific region info
  */
-static int vfio_get_region(mdev_device_t *mdev,
-			   struct vfio_region_info *region_info, __u32 region)
+static struct vfio_region_info *vfio_get_region(mdev_device_t *mdev, __u32 region)
 {
 	int ret;
-	__u16 id = VFIO_REGION_INFO_CAP_TYPE;
+	struct vfio_region_info *region_info = NULL;
 
 	ODP_DBG("Region:%d\n", region);
-	region_info->index = region;
+	region_info = calloc(1, sizeof(*region_info));
+	if (!region_info)
+		goto out;
 
+	region_info->index = region;
+	region_info->argsz = sizeof(*region_info);
 	ret = ioctl(mdev->device, VFIO_DEVICE_GET_REGION_INFO, region_info);
-	if (ret < 0) {
+	if (ret < 0 || !region_info->size) {
 		vfio_print_fail(VFIO_DEVICE_GET_REGION_INFO);
-		return ret;
+		goto out;
 	}
 
-	if (!region_info->size)
-		return 0;
+	if (region_info->argsz > sizeof(*region_info)) {
+		region_info = realloc(region_info, region_info->argsz);
+		ODP_DBG("region info %d with extended capabilities size: %u\n",
+			region, region_info->argsz);
+		ret = ioctl(mdev->device, VFIO_DEVICE_GET_REGION_INFO, region_info);
+		if (ret < 0 || !region_info->size) {
+			vfio_print_fail(VFIO_DEVICE_GET_REGION_INFO);
+			goto out;
+		}
+	}
 
-	/*  FIXME call proper function and id, Rx/Tx descriptors are types
-	 * BAR regions are sparse mmaps
-	 */
-	if (id == VFIO_REGION_INFO_CAP_TYPE)
-		ret = vfio_get_region_cap_type(mdev->device, region_info);
-	else if (id == VFIO_REGION_INFO_CAP_SPARSE_MMAP)
-		ret = vfio_get_region_sparse_mmaps(mdev->device, region_info);
-
-	return ret;
+	return region_info;
+out:
+	if (region_info)
+		free(region_info);
+	return NULL;
 }
 
 /**
@@ -467,27 +452,27 @@ int mdev_device_create(mdev_device_t *mdev, const char *mod_name,
 	if (mdev->device < 0)
 		goto fail;
 
+	ret = -EINVAL;
 	for (uint32_t region = 0; region < device_info.num_regions; region++) {
-		struct vfio_region_info region_info;
+		struct vfio_region_info *region_info;
 
-		region_info.argsz = sizeof(region_info);
-
-		ret = vfio_get_region(mdev, &region_info, region);
-		if (ret < 0)
+		region_info = vfio_get_region(mdev, region);
+		if (!region_info)
 			continue;
 
-		if (!region_info.size)
-			continue;
-
-		ret = region_info_cb(mdev, &region_info);
+		ret = region_info_cb(mdev, region_info);
 		if (ret < 0) {
 			ODP_ERR("Region info cb fail on region_info[%u]\n",
 				region);
 			return -1;
 		}
+
+		free(region_info);
+		region_info = NULL;
+		ret = 0;
 	}
 
-	return 0;
+	return ret;
 
 fail:
 	return -1;
