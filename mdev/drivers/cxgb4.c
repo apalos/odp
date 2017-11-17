@@ -239,7 +239,7 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 
 	rxq->rx_descs = mdev_region_mmap(&pkt_cxgb4->mdev, offset, size);
 	if (rxq->rx_descs == MAP_FAILED) {
-		ODP_ERR("Cannot mmap TX queue\n");
+		ODP_ERR("Cannot mmap RX queue\n");
 		return -1;
 	}
 
@@ -249,14 +249,14 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	rxq->free_list =
 	    mdev_region_mmap(&pkt_cxgb4->mdev, free_list_offset, ODP_PAGE_SIZE);
 	if (rxq->free_list == MAP_FAILED) {
-		ODP_ERR("Cannot mmap TX queue\n");
+		ODP_ERR("Cannot mmap RX queue free list\n");
 		return -1;
 	}
 
 	rx_data.size = rxq->free_list_len * ODP_PAGE_SIZE;
 	ret = iomem_alloc_dma(&pkt_cxgb4->mdev, &rx_data);
 	if (ret) {
-		ODP_ERR("Cannot allocate TX queue DMA area\n");
+		ODP_ERR("Cannot allocate RX queue DMA area\n");
 		return -1;
 	}
 	rxq->rx_data_base = rx_data.vaddr;
