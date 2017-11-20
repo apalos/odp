@@ -369,13 +369,13 @@ static int cxgb4_region_info_cb(mdev_device_t *mdev,
 		if (class_info.subtype == VFIO_NET_MDEV_RX) {
 			struct vfio_region_info_cap_sparse_mmap *sparse;
 			if (vfio_get_region_sparse_mmaps(region_info, &sparse) < 0) {
-				ODP_ERR("RX queue in region %u: no free list\n",
+				ODP_ERR("RX queue in region %u: no areas found\n",
 					region_info->index);
 				return -1;
 			}
 
 			if (sparse->nr_areas != 2) {
-				ODP_ERR("RX queue in region %u: corrupt free list\n",
+				ODP_ERR("RX queue in region %u: wrong number of areas\n",
 				        region_info->index);
 				return -1;
 			}
