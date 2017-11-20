@@ -24,6 +24,7 @@ noinst_HEADERS = \
 __LIB__libnet_mdev_r8169_la_SOURCES = \
 		api/mm.c \
 		api/vfio_api.c \
+		api/ethtool_api.c \
 		api/sysfs_parse.c \
 		api/eth_stats.c \
 		drivers/r8169.c
@@ -31,6 +32,7 @@ __LIB__libnet_mdev_r8169_la_SOURCES = \
 __LIB__libnet_mdev_e1000e_la_SOURCES = \
 		api/mm.c \
 		api/vfio_api.c \
+		api/ethtool_api.c \
 		api/sysfs_parse.c \
 		api/eth_stats.c \
 		drivers/e1000e.c
@@ -38,6 +40,7 @@ __LIB__libnet_mdev_e1000e_la_SOURCES = \
 __LIB__libnet_mdev_cxgb4_la_SOURCES = \
 		api/mm.c \
 		api/vfio_api.c \
+		api/ethtool_api.c \
 		api/sysfs_parse.c \
 		api/eth_stats.c \
 		drivers/cxgb4.c

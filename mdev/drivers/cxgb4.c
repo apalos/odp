@@ -24,6 +24,7 @@
 #include <mm_api.h>
 #include <reg_api.h>
 #include <vfio_api.h>
+#include <ethtool_api.h>
 #include <sysfs_parse.h>
 #include <eth_stats.h>
 #include <common.h>
@@ -211,6 +212,7 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	cxgb4_rx_queue_t *rxq = &pkt_cxgb4->rx_queues[rxq_idx];
 	uint32_t doorbell_offset;
 	struct iomem rx_data;
+	struct ethtool_ringparam ering;
 	char path[2048];
 	int ret;
 
@@ -218,8 +220,15 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 
 	memset(path, 0, sizeof(path));
 
-	rxq->rx_queue_len = 1024; /* TODO: ethtool_ringparam.rx_mini_pending */
-	rxq->free_list_len = 72; /* TODO: ethtool_ringparam.rx_pending + 8 */
+	ret = mdev_ringparam_get(&pkt_cxgb4->mdev, &ering);
+	if (!ret) {
+		ODP_ERR("Cannot get ethtool parameters\n");
+		return -1;
+	}
+	rxq->rx_queue_len = ering.rx_mini_pending;
+	rxq->free_list_len = ering.rx_mini_pending + 8;
+	ODP_DBG("RX descriptors: %u\n", rxq->rx_queue_len);
+	ODP_DBG("RX free-list: %u\n", rxq->free_list_len);
 
 	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_offset",
 		 rxq_idx);
@@ -281,6 +290,7 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
 	cxgb4_tx_queue_t *txq = &pkt_cxgb4->tx_queues[txq_idx];
 	uint32_t doorbell_offset;
 	struct iomem tx_data;
+	struct ethtool_ringparam ering;
 	char path[2048];
 	int ret;
 
@@ -288,7 +298,13 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
 
 	memset(path, 0, sizeof(path));
 
-	txq->tx_queue_len = 1024; /* TODO: ethtool_ringparam.tx_pending */
+	ret = mdev_ringparam_get(&pkt_cxgb4->mdev, &ering);
+	if (!ret) {
+		ODP_ERR("Cannot get ethtool parameters\n");
+		return -1;
+	}
+	txq->tx_queue_len = ering.tx_pending;
+	ODP_DBG("TX descriptors: %u\n", txq->tx_queue_len);
 
 	snprintf(path, sizeof(path) - 1, "queues/tx-%u/cxgb4/doorbell_offset",
 		 txq_idx);

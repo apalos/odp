@@ -23,6 +23,7 @@
 #include <mm_api.h>
 #include <reg_api.h>
 #include <vfio_api.h>
+#include <ethtool_api.h>
 #include <sysfs_parse.h>
 #include <eth_stats.h>
 #include <common.h>
@@ -145,11 +146,18 @@ static int e1000e_mmio_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 static int e1000e_rx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 				    uint64_t offset, uint64_t size)
 {
+	struct ethtool_ringparam ering;
 	int ret;
 
 	ODP_ASSERT(pkt_e1000e->capa.max_input_queues == 0);
 
-	pkt_e1000e->rx_queue_len = 256; /* TODO: ethtool_ringparam.rx_pending */
+	ret = mdev_ringparam_get(&pkt_e1000e->mdev, &ering);
+	if (!ret) {
+		ODP_ERR("Cannot get ethtool parameters\n");
+		return -1;
+	}
+	pkt_e1000e->rx_queue_len = ering.rx_pending;
+	ODP_DBG("RX descriptors: %u\n", pkt_e1000e->rx_queue_len);
 
 	pkt_e1000e->rx_descs = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
 	if (pkt_e1000e->rx_descs == MAP_FAILED) {
@@ -176,11 +184,18 @@ static int e1000e_rx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 static int e1000e_tx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 				    uint64_t offset, uint64_t size)
 {
+	struct ethtool_ringparam ering;
 	int ret;
 
 	ODP_ASSERT(pkt_e1000e->capa.max_output_queues == 0);
 
-	pkt_e1000e->tx_queue_len = 256; /* TODO: ethtool_ringparam.tx_pending */
+	ret = mdev_ringparam_get(&pkt_e1000e->mdev, &ering);
+	if (!ret) {
+		ODP_ERR("Cannot get ethtool parameters\n");
+		return -1;
+	}
+	pkt_e1000e->tx_queue_len = ering.tx_pending; /* TODO: ethtool_ringparam.tx_pending */
+	ODP_DBG("TX descriptors: %u\n", pkt_e1000e->tx_queue_len);
 
 	pkt_e1000e->tx_descs = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
 	if (pkt_e1000e->tx_descs == MAP_FAILED) {
