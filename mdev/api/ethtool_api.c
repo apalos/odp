@@ -25,7 +25,6 @@ static int send_ioctl(int fd, void *cmd, char *if_name)
 
 int mdev_ringparam_get(mdev_device_t *mdev, struct ethtool_ringparam *ering)
 {
-
 	int fd, err;
 
 	fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -33,7 +32,7 @@ int mdev_ringparam_get(mdev_device_t *mdev, struct ethtool_ringparam *ering)
 		return -EINVAL;
 
 	ering->cmd = ETHTOOL_GRINGPARAM;
-	err = send_ioctl(fd, &ering, mdev->if_name);
+	err = send_ioctl(fd, ering, mdev->if_name);
 	close(fd);
 
 	return err;

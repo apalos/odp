@@ -152,12 +152,11 @@ static int e1000e_rx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 	ODP_ASSERT(pkt_e1000e->capa.max_input_queues == 0);
 
 	ret = mdev_ringparam_get(&pkt_e1000e->mdev, &ering);
-	if (!ret) {
+	if (ret) {
 		ODP_ERR("Cannot get ethtool parameters\n");
 		return -1;
 	}
 	pkt_e1000e->rx_queue_len = ering.rx_pending;
-	ODP_DBG("RX descriptors: %u\n", pkt_e1000e->rx_queue_len);
 
 	pkt_e1000e->rx_descs = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
 	if (pkt_e1000e->rx_descs == MAP_FAILED) {
@@ -177,6 +176,7 @@ static int e1000e_rx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 	pkt_e1000e->capa.max_input_queues++;
 
 	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
+	ODP_DBG("    RX descriptors: %u\n", pkt_e1000e->rx_queue_len);
 
 	return 0;
 }
@@ -190,12 +190,11 @@ static int e1000e_tx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 	ODP_ASSERT(pkt_e1000e->capa.max_output_queues == 0);
 
 	ret = mdev_ringparam_get(&pkt_e1000e->mdev, &ering);
-	if (!ret) {
+	if (ret) {
 		ODP_ERR("Cannot get ethtool parameters\n");
 		return -1;
 	}
-	pkt_e1000e->tx_queue_len = ering.tx_pending; /* TODO: ethtool_ringparam.tx_pending */
-	ODP_DBG("TX descriptors: %u\n", pkt_e1000e->tx_queue_len);
+	pkt_e1000e->tx_queue_len = ering.tx_pending;
 
 	pkt_e1000e->tx_descs = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
 	if (pkt_e1000e->tx_descs == MAP_FAILED) {
@@ -213,6 +212,7 @@ static int e1000e_tx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 	pkt_e1000e->capa.max_output_queues++;
 
 	ODP_DBG("Register TX queue region: 0x%llx@%016llx\n", size, offset);
+	ODP_DBG("    TX descriptors: %u\n", pkt_e1000e->tx_queue_len);
 
 	return 0;
 }

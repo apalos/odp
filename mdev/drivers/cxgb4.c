@@ -221,14 +221,12 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	memset(path, 0, sizeof(path));
 
 	ret = mdev_ringparam_get(&pkt_cxgb4->mdev, &ering);
-	if (!ret) {
+	if (ret) {
 		ODP_ERR("Cannot get ethtool parameters\n");
 		return -1;
 	}
 	rxq->rx_queue_len = ering.rx_mini_pending;
-	rxq->free_list_len = ering.rx_mini_pending + 8;
-	ODP_DBG("RX descriptors: %u\n", rxq->rx_queue_len);
-	ODP_DBG("RX free-list: %u\n", rxq->free_list_len);
+	rxq->free_list_len = ering.rx_pending + 8;
 
 	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_offset",
 		 rxq_idx);
@@ -279,6 +277,8 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	cxgb4_rx_refill(rxq, rxq->free_list_len - 8);
 
 	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
+	ODP_DBG("    RX descriptors: %u\n", rxq->rx_queue_len);
+	ODP_DBG("    RX free list entries: %u\n", rxq->free_list_len);
 
 	return 0;
 }
@@ -299,12 +299,11 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
 	memset(path, 0, sizeof(path));
 
 	ret = mdev_ringparam_get(&pkt_cxgb4->mdev, &ering);
-	if (!ret) {
+	if (ret) {
 		ODP_ERR("Cannot get ethtool parameters\n");
 		return -1;
 	}
 	txq->tx_queue_len = ering.tx_pending;
-	ODP_DBG("TX descriptors: %u\n", txq->tx_queue_len);
 
 	snprintf(path, sizeof(path) - 1, "queues/tx-%u/cxgb4/doorbell_offset",
 		 txq_idx);
@@ -342,6 +341,7 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
 	txq->tx_data_size = tx_data.size;
 
 	ODP_DBG("Register TX queue region: 0x%llx@%016llx\n", size, offset);
+	ODP_DBG("    TX descriptors: %u\n", txq->tx_queue_len);
 
 	return 0;
 }
