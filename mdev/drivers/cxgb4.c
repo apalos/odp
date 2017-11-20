@@ -588,7 +588,7 @@ static int cxgb4_recv(pktio_entry_t * pktio_entry,
 		if (odp_unlikely(pkt == ODP_PACKET_INVALID))
 			ret = -1;
 
-		offset = 0; /* TODO: any better name for this */
+		offset = 0;
 		while (offset <= pkt_len) {
 			void *from =
 			    rxq->rx_data_base + rxq->cidx * ODP_PAGE_SIZE +

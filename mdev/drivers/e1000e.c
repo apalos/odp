@@ -229,10 +229,6 @@ static int e1000e_region_info_cb(mdev_device_t *mdev,
 	if (ret < 0)
 		return ret;
 
-	/*
-	 * TODO: parse region_info capabilities instead of hardcoded region
-	 * index and call relevant hook
-	 */
 	switch (class_info.type) {
 	case VFIO_NET_MMIO:
 		ret =

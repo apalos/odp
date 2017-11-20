@@ -173,7 +173,7 @@ static int r8169_rx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 
 	ODP_ASSERT(pkt_r8169->capa.max_input_queues == 0);
 
-	pkt_r8169->rx_queue_len = 256; /* TODO: ethtool_ringparam.rx_pending */
+	pkt_r8169->rx_queue_len = 256; /* no ethtool support in r8169 */
 
 	pkt_r8169->rx_descs = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
 	if (pkt_r8169->rx_descs == MAP_FAILED) {
@@ -193,6 +193,7 @@ static int r8169_rx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 	pkt_r8169->capa.max_input_queues++;
 
 	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
+	ODP_DBG("    RX descriptors: %u\n", pkt_r8169->rx_queue_len);
 
 	return 0;
 }
@@ -204,7 +205,7 @@ static int r8169_tx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 
 	ODP_ASSERT(pkt_r8169->capa.max_output_queues == 0);
 
-	pkt_r8169->tx_queue_len = 64; /* TODO: ethtool_ringparam.tx_pending */
+	pkt_r8169->tx_queue_len = 64; /* no ethtool support in r8169 */
 
 	pkt_r8169->tx_descs = mdev_region_mmap(&pkt_r8169->mdev, offset, size);
 	if (pkt_r8169->tx_descs == MAP_FAILED) {
@@ -222,6 +223,7 @@ static int r8169_tx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 	pkt_r8169->capa.max_output_queues++;
 
 	ODP_DBG("Register TX queue region: 0x%llx@%016llx\n", size, offset);
+	ODP_DBG("    TX descriptors: %u\n", pkt_r8169->tx_queue_len);
 
 	return 0;
 }
