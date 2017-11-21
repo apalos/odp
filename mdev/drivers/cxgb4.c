@@ -529,15 +529,15 @@ static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num)
 }
 
 static int cxgb4_recv(pktio_entry_t * pktio_entry,
-		      int index, odp_packet_t pkt_table[], int num)
+		      int rxq_idx, odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
-	cxgb4_rx_queue_t *rxq = &pkt_cxgb4->rx_queues[index];
+	cxgb4_rx_queue_t *rxq = &pkt_cxgb4->rx_queues[rxq_idx];
 	uint16_t refill_count = 0;
 	int rx_pkts = 0;
 
 	if (!pkt_cxgb4->lockless_rx)
-		odp_ticketlock_lock(&pkt_cxgb4->rx_locks[index]);
+		odp_ticketlock_lock(&pkt_cxgb4->rx_locks[rxq_idx]);
 
 	while (num) {
 		volatile cxgb4_rx_desc_t *rxd = &rxq->rx_descs[rxq->rx_next];
@@ -641,21 +641,21 @@ static int cxgb4_recv(pktio_entry_t * pktio_entry,
 		cxgb4_rx_refill(rxq, refill_count);
 
 	if (!pkt_cxgb4->lockless_rx)
-		odp_ticketlock_unlock(&pkt_cxgb4->rx_locks[index]);
+		odp_ticketlock_unlock(&pkt_cxgb4->rx_locks[rxq_idx]);
 
 	return rx_pkts;
 }
 
 static int cxgb4_send(pktio_entry_t *pktio_entry,
-		      int index, const odp_packet_t pkt_table[], int num)
+		      int txq_idx, const odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
-	cxgb4_tx_queue_t *txq = &pkt_cxgb4->tx_queues[index];
+	cxgb4_tx_queue_t *txq = &pkt_cxgb4->tx_queues[txq_idx];
 	uint16_t budget;
 	int tx_pkts = 0;
 
 	if (!pkt_cxgb4->lockless_tx)
-		odp_ticketlock_lock(&pkt_cxgb4->tx_locks[index]);
+		odp_ticketlock_lock(&pkt_cxgb4->tx_locks[txq_idx]);
 
 	/* Determine how many packets will fit in TX queue */
 	budget = txq->tx_queue_len - 1;
@@ -722,7 +722,7 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 	io_write32(odpdrv_cpu_to_be_32(txq->doorbell_key | tx_pkts), txq->doorbell);
 
 	if (!pkt_cxgb4->lockless_tx)
-		odp_ticketlock_unlock(&pkt_cxgb4->tx_locks[index]);
+		odp_ticketlock_unlock(&pkt_cxgb4->tx_locks[txq_idx]);
 
 	odp_packet_free_multi(pkt_table, tx_pkts);
 

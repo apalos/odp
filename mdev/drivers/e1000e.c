@@ -341,7 +341,7 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 	io_write32(odpdrv_cpu_to_le_32(i), pkt_e1000e->mmio + E1000_RDT_OFFSET);
 }
 
-static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
+static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 		       odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
@@ -411,7 +411,7 @@ static int e1000e_recv(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
 	return rx_pkts;
 }
 
-static int e1000e_send(pktio_entry_t * pktio_entry, int index ODP_UNUSED,
+static int e1000e_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 		       const odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);

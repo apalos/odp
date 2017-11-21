@@ -84,7 +84,7 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 static void r8169_wait_link_up(pktio_entry_t *pktio_entry);
 static int r8169_close(pktio_entry_t *pktio_entry);
 
-static int r8169_send(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
+static int r8169_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 		      const odp_packet_t pkt_table[] ODP_UNUSED, int num)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
@@ -355,7 +355,7 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 	}
 }
 
-static int r8169_recv(pktio_entry_t *pktio_entry, int index ODP_UNUSED,
+static int r8169_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 		      odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
