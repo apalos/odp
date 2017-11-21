@@ -374,18 +374,18 @@ static int cxgb4_region_info_cb(mdev_device_t *mdev,
 				return -1;
 			}
 
-			if (sparse->nr_areas != 2) {
+			if (sparse->nr_areas != 1) {
 				ODP_ERR("RX queue in region %u: wrong number of areas\n",
 				        region_info->index);
 				return -1;
 			}
 
-			ODP_ASSERT(sparse->areas[1].size == ODP_PAGE_SIZE);
+			ODP_ASSERT(sparse->areas[0].size == ODP_PAGE_SIZE);
 
 			return cxgb4_rx_queue_register(pkt_cxgb4,
-						       sparse->areas[0].offset,
-						       sparse->areas[0].size,
-						       sparse->areas[1].offset);
+						       region_info->offset,
+						       region_info->size,
+						       sparse->areas[0].offset);
 		}
 		if (class_info.subtype == VFIO_NET_MDEV_TX)
 			return cxgb4_tx_queue_register(pkt_cxgb4,
