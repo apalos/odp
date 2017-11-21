@@ -40,7 +40,7 @@
 #define E1000_TDT_OFFSET 0x03818UL
 
 typedef struct {
-	odpdrv_u64le_t buffer_addr;		/* Address of the descriptor's data buffer */
+	odpdrv_u64le_t buffer_addr;		/* Address of data buffer */
 	union {
 #define E1000_TXD_CMD_EOP	0x01000000	/* End of Packet */
 #define E1000_TXD_CMD_IFCS	0x02000000	/* Insert FCS (Ethernet CRC) */
@@ -73,23 +73,23 @@ typedef union {
 	} read;
 	struct {
 		struct {
-			odpdrv_u32le_t mrq;			/* Multiple Rx Queues */
+			odpdrv_u32le_t mrq;
 			union {
-				odpdrv_u32le_t rss;		/* RSS Hash */
+				odpdrv_u32le_t rss;
 				struct {
-					odpdrv_u16le_t ip_id;	/* IP id */
-					odpdrv_u16le_t csum;	/* Packet Checksum */
+					odpdrv_u16le_t ip_id;
+					odpdrv_u16le_t csum;
 				} csum_ip;
 			} hi_dword;
 		} lower;
 		struct {
 #define E1000E_RX_DESC_STAT_DONE	0x00000001UL
 #define E1000E_RX_DESC_STAT_ERR_MASK	0xff000000UL
-			odpdrv_u32le_t status_error;		/* ext status/error */
+			odpdrv_u32le_t status_error;
 			odpdrv_u16le_t length;
-			odpdrv_u16le_t vlan;			/* VLAN tag */
+			odpdrv_u16le_t vlan;
 		} upper;
-	} wb;							/* writeback */
+	} wb;
 } e1000e_rx_desc_t;
 
 /** Packet socket using mediated e1000e device */
@@ -158,13 +158,15 @@ static int e1000e_rx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 	}
 	pkt_e1000e->rx_queue_len = ering.rx_pending;
 
-	pkt_e1000e->rx_descs = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
+	pkt_e1000e->rx_descs =
+	    mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
 	if (pkt_e1000e->rx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap RX queue\n");
 		return -1;
 	}
 
-	pkt_e1000e->rx_data.size = pkt_e1000e->rx_queue_len * E1000E_RX_BUF_SIZE;
+	pkt_e1000e->rx_data.size =
+	    pkt_e1000e->rx_queue_len * E1000E_RX_BUF_SIZE;
 	ret = iomem_alloc_dma(&pkt_e1000e->mdev, &pkt_e1000e->rx_data);
 	if (ret) {
 		ODP_ERR("Cannot allocate RX queue DMA area\n");
@@ -196,13 +198,15 @@ static int e1000e_tx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 	}
 	pkt_e1000e->tx_queue_len = ering.tx_pending;
 
-	pkt_e1000e->tx_descs = mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
+	pkt_e1000e->tx_descs =
+	    mdev_region_mmap(&pkt_e1000e->mdev, offset, size);
 	if (pkt_e1000e->tx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap TX queue\n");
 		return -1;
 	}
 
-	pkt_e1000e->tx_data.size = pkt_e1000e->tx_queue_len * E1000E_TX_BUF_SIZE;
+	pkt_e1000e->tx_data.size =
+	    pkt_e1000e->tx_queue_len * E1000E_TX_BUF_SIZE;
 	ret = iomem_alloc_dma(&pkt_e1000e->mdev, &pkt_e1000e->tx_data);
 	if (ret) {
 		ODP_ERR("Cannot allocate TX queue DMA area\n");
@@ -239,12 +243,14 @@ static int e1000e_region_info_cb(mdev_device_t *mdev,
 	case VFIO_NET_DESCRIPTORS:
 		if (class_info.subtype == VFIO_NET_MDEV_RX)
 			ret =
-				e1000e_rx_queue_register(pkt_e1000e, region_info->offset,
-							 region_info->size);
+			    e1000e_rx_queue_register(pkt_e1000e,
+						     region_info->offset,
+						     region_info->size);
 		else if (class_info.subtype == VFIO_NET_MDEV_TX)
 			ret =
-				e1000e_tx_queue_register(pkt_e1000e, region_info->offset,
-							 region_info->size);
+			    e1000e_tx_queue_register(pkt_e1000e,
+						     region_info->offset,
+						     region_info->size);
 		break;
 
 	default:
@@ -327,8 +333,6 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 
 		rxd->read.buffer_addr =
 		    odpdrv_cpu_to_le_64(pkt_e1000e->rx_data.iova + offset);
-		// rxd->read.reserved
-		// rxd->wb
 
 		i++;
 		if (i == pkt_e1000e->rx_queue_len)
@@ -400,7 +404,8 @@ static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 		pkt_hdr->input = pktio_entry->s.handle;
 
 		pkt_e1000e->rx_next++;
-		if (odp_unlikely(pkt_e1000e->rx_next >= pkt_e1000e->rx_queue_len))
+		if (odp_unlikely
+		    (pkt_e1000e->rx_next >= pkt_e1000e->rx_queue_len))
 			pkt_e1000e->rx_next = 0;
 
 		rx_pkts++;
@@ -454,7 +459,8 @@ static int e1000e_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 		txd->upper.data = odpdrv_cpu_to_le_32(0);
 
 		pkt_e1000e->tx_next++;
-		if (odp_unlikely(pkt_e1000e->tx_next >= pkt_e1000e->tx_queue_len))
+		if (odp_unlikely
+		    (pkt_e1000e->tx_next >= pkt_e1000e->tx_queue_len))
 			pkt_e1000e->tx_next = 0;
 
 		tx_pkts++;
@@ -488,9 +494,8 @@ static int e1000e_link_status(pktio_entry_t *pktio_entry)
 /* TODO: move to common code */
 static void e1000e_wait_link_up(pktio_entry_t *pktio_entry)
 {
-	while (!e1000e_link_status(pktio_entry)) {
+	while (!e1000e_link_status(pktio_entry))
 		sleep(1);
-	}
 }
 
 static pktio_ops_module_t e1000e_pktio_ops = {

@@ -189,7 +189,7 @@ static void cxgb4_wait_link_up(pktio_entry_t *pktio_entry);
 static int cxgb4_close(pktio_entry_t *pktio_entry);
 
 static int cxgb4_mmio_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
-				uint64_t offset, uint64_t size)
+			       uint64_t offset, uint64_t size)
 {
 	ODP_ASSERT(pkt_cxgb4->mmio == NULL);
 
@@ -236,7 +236,8 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	}
 	rxq->doorbell = (odpdrv_u32be_t *)(pkt_cxgb4->mmio + doorbell_offset);
 
-	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_key", rxq_idx);
+	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_key",
+		 rxq_idx);
 	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &rxq->doorbell_key) < 0) {
 		ODP_ERR("Cannot get %s\n", path);
 		return -1;
@@ -283,7 +284,7 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	return 0;
 }
 
-static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
+static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 				   uint64_t offset, uint64_t size)
 {
 	uint16_t txq_idx = pkt_cxgb4->capa.max_output_queues++;
@@ -313,7 +314,8 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
 	}
 	txq->doorbell = (odpdrv_u32be_t *)(pkt_cxgb4->mmio + doorbell_offset);
 
-	snprintf(path, sizeof(path) - 1, "queues/tx-%u/cxgb4/doorbell_key", txq_idx);
+	snprintf(path, sizeof(path) - 1, "queues/tx-%u/cxgb4/doorbell_key",
+		 txq_idx);
 	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &txq->doorbell_key) < 0) {
 		ODP_ERR("Cannot get %s\n", path);
 		return -1;
@@ -328,7 +330,8 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t * pkt_cxgb4,
 		return -1;
 	}
 
-	txq->stats = (cxgb4_tx_queue_stats *)(txq->tx_descs + txq->tx_queue_len);
+	txq->stats =
+	    (cxgb4_tx_queue_stats *)(txq->tx_descs + txq->tx_queue_len);
 
 	tx_data.size = txq->tx_queue_len * CXGB4_TX_BUF_SIZE;
 	ret = iomem_alloc_dma(&pkt_cxgb4->mdev, &tx_data);
@@ -368,15 +371,19 @@ static int cxgb4_region_info_cb(mdev_device_t *mdev,
 	case VFIO_NET_DESCRIPTORS:
 		if (class_info.subtype == VFIO_NET_MDEV_RX) {
 			struct vfio_region_info_cap_sparse_mmap *sparse;
-			if (vfio_get_region_sparse_mmaps(region_info, &sparse) < 0) {
-				ODP_ERR("RX queue in region %u: no areas found\n",
-					region_info->index);
+
+			if (vfio_get_region_sparse_mmaps(region_info,
+							 &sparse) < 0) {
+				ODP_ERR("RX queue in region %u: %s\n",
+					region_info->index,
+					"no areas found");
 				return -1;
 			}
 
 			if (sparse->nr_areas != 2) {
-				ODP_ERR("RX queue in region %u: wrong number of areas\n",
-				        region_info->index);
+				ODP_ERR("RX queue in region %u: %s\n",
+					region_info->index,
+					"wrong number of areas");
 				return -1;
 			}
 
@@ -402,8 +409,8 @@ static int cxgb4_region_info_cb(mdev_device_t *mdev,
 }
 
 static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
-		       pktio_entry_t * pktio_entry,
-		       const char *resource, odp_pool_t pool)
+		      pktio_entry_t *pktio_entry,
+		      const char *resource, odp_pool_t pool)
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
 	int ret;
@@ -431,20 +438,20 @@ static int cxgb4_open(odp_pktio_t id ODP_UNUSED,
 	for (uint32_t i = 0; i < ARRAY_SIZE(pkt_cxgb4->tx_locks); i++)
 		odp_ticketlock_init(&pkt_cxgb4->tx_locks[i]);
 
-	if (mdev_attr_u8_get(&pkt_cxgb4->mdev,
-	     "tx_channel", &pkt_cxgb4->tx_channel) < 0) {
+	if (mdev_attr_u8_get(&pkt_cxgb4->mdev, "tx_channel",
+			     &pkt_cxgb4->tx_channel) < 0) {
 		ODP_ERR("Cannot get %s\n", "tx_channel");
 		goto out;
 	}
 
-	if (mdev_attr_u8_get(&pkt_cxgb4->mdev,
-	     "phys_function", &pkt_cxgb4->phys_function) < 0) {
+	if (mdev_attr_u8_get(&pkt_cxgb4->mdev, "phys_function",
+			     &pkt_cxgb4->phys_function) < 0) {
 		ODP_ERR("Cannot get %s\n", "phys_function");
 		goto out;
 	}
 
-	if (mdev_attr_u16_get(&pkt_cxgb4->mdev,
-	     "free_list_align", &pkt_cxgb4->free_list_align) < 0) {
+	if (mdev_attr_u16_get(&pkt_cxgb4->mdev, "free_list_align",
+			      &pkt_cxgb4->free_list_align) < 0) {
 		ODP_ERR("Cannot get %s\n", "free_list_align");
 		goto out;
 	}
@@ -460,7 +467,6 @@ out:
 	cxgb4_close(pktio_entry);
 	return -1;
 }
-
 
 static int cxgb4_close(pktio_entry_t *pktio_entry)
 {
@@ -528,7 +534,7 @@ static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num)
 	}
 }
 
-static int cxgb4_recv(pktio_entry_t * pktio_entry,
+static int cxgb4_recv(pktio_entry_t *pktio_entry,
 		      int rxq_idx, odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
@@ -603,14 +609,16 @@ static int cxgb4_recv(pktio_entry_t * pktio_entry,
 
 			offset += len;
 
-			rxq->offset += ROUNDUP_ALIGN(len, pkt_cxgb4->free_list_align);
+			rxq->offset +=
+			    ROUNDUP_ALIGN(len, pkt_cxgb4->free_list_align);
 
 			ODP_ASSERT(rxq->offset <= ODP_PAGE_SIZE);
 
-			if (rxq->offset >= ODP_PAGE_SIZE)
-			{
+			if (rxq->offset >= ODP_PAGE_SIZE) {
 				rxq->cidx++;
-				if (odp_unlikely(rxq->cidx >= rxq->free_list_len))
+
+				if (odp_unlikely
+				    (rxq->cidx >= rxq->free_list_len))
 					rxq->cidx = 0;
 
 				rxq->offset = 0;
@@ -719,7 +727,8 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 	}
 
 	/* Ring the doorbell */
-	io_write32(odpdrv_cpu_to_be_32(txq->doorbell_key | tx_pkts), txq->doorbell);
+	io_write32(odpdrv_cpu_to_be_32(txq->doorbell_key | tx_pkts),
+		   txq->doorbell);
 
 	if (!pkt_cxgb4->lockless_tx)
 		odp_ticketlock_unlock(&pkt_cxgb4->tx_locks[txq_idx]);
@@ -739,9 +748,8 @@ static int cxgb4_link_status(pktio_entry_t *pktio_entry)
 /* TODO: move to common code */
 static void cxgb4_wait_link_up(pktio_entry_t *pktio_entry)
 {
-	while (!cxgb4_link_status(pktio_entry)) {
+	while (!cxgb4_link_status(pktio_entry))
 		sleep(1);
-	}
 }
 
 static pktio_ops_module_t cxgb4_pktio_ops = {

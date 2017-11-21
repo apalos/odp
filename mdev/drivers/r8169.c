@@ -114,7 +114,8 @@ static int r8169_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
 				       pkt_r8169->tx_data.vaddr + offset);
 
-		txd->addr = odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova + offset);
+		txd->addr =
+		    odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova + offset);
 		/* FIXME no fragmentation support */
 		opts[0] = DescOwn;
 		opts[0] |= FirstFrag | LastFrag;
@@ -151,7 +152,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 }
 
 static int r8169_mmio_register(pktio_ops_r8169_data_t *pkt_r8169,
-				uint64_t offset, uint64_t size)
+			       uint64_t offset, uint64_t size)
 {
 	ODP_ASSERT(pkt_r8169->mmio == NULL);
 
@@ -167,7 +168,7 @@ static int r8169_mmio_register(pktio_ops_r8169_data_t *pkt_r8169,
 }
 
 static int r8169_rx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
-				    uint64_t offset, uint64_t size)
+				   uint64_t offset, uint64_t size)
 {
 	int ret;
 
@@ -199,7 +200,7 @@ static int r8169_rx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 }
 
 static int r8169_tx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
-				    uint64_t offset, uint64_t size)
+				   uint64_t offset, uint64_t size)
 {
 	int ret;
 
@@ -229,7 +230,7 @@ static int r8169_tx_queue_register(pktio_ops_r8169_data_t *pkt_r8169,
 }
 
 static int r8169_region_info_cb(mdev_device_t *mdev,
-				 struct vfio_region_info *region_info)
+				struct vfio_region_info *region_info)
 {
 	pktio_ops_r8169_data_t *pkt_r8169 =
 	    odp_container_of(mdev, pktio_ops_r8169_data_t, mdev);
@@ -250,12 +251,14 @@ static int r8169_region_info_cb(mdev_device_t *mdev,
 	case VFIO_NET_DESCRIPTORS:
 		if (class_info.subtype == VFIO_NET_MDEV_RX)
 			ret =
-				r8169_rx_queue_register(pkt_r8169, region_info->offset,
-							region_info->size);
+			    r8169_rx_queue_register(pkt_r8169,
+						    region_info->offset,
+						    region_info->size);
 		else if (class_info.subtype == VFIO_NET_MDEV_TX)
 			ret =
-				r8169_tx_queue_register(pkt_r8169, region_info->offset,
-							region_info->size);
+			    r8169_tx_queue_register(pkt_r8169,
+						    region_info->offset,
+						    region_info->size);
 		break;
 
 	default:
@@ -264,8 +267,6 @@ static int r8169_region_info_cb(mdev_device_t *mdev,
 		ret = -1;
 		break;
 	}
-
-
 
 	return ret;
 }
@@ -429,9 +430,8 @@ static int r8169_link_status(pktio_entry_t *pktio_entry)
 /* TODO: move to common code */
 static void r8169_wait_link_up(pktio_entry_t *pktio_entry)
 {
-	while (!r8169_link_status(pktio_entry)) {
+	while (!r8169_link_status(pktio_entry))
 		sleep(1);
-	}
 }
 
 static pktio_ops_module_t r8169_pktio_ops = {
