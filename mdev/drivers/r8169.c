@@ -8,11 +8,11 @@
 #include <sys/mman.h>
 #include <linux/types.h>
 
-#include <odp/drv/byteorder.h>
 #include <odp/api/hints.h>
-#include <odp/drv/hints.h>
 #include <odp/api/plat/packet_inlines.h>
 #include <odp/api/packet.h>
+
+#include <odp/drv/hints.h>
 
 #include <odp_packet_io_internal.h>
 
@@ -37,9 +37,9 @@ typedef struct {
 #define	RxRES		(1U << 21)
 #define DescOwn		(1U << 31)	/* Descriptor is owned by NIC */
 #define RingEnd		(1U << 30)	/* End of descriptor ring */
-	odpdrv_u32le_t opts1;
-	odpdrv_u32le_t opts2;
-	odpdrv_u64le_t addr;
+	odp_u32le_t opts1;
+	odp_u32le_t opts2;
+	odp_u64le_t addr;
 } r8169_rx_desc_t;
 
 typedef struct {
@@ -47,9 +47,9 @@ typedef struct {
 #define LastFrag	(1U << 28)	/* Final segment of a packet */
 #define DescOwn		(1U << 31)	/* Descriptor is owned by NIC */
 #define RingEnd		(1U << 30)	/* End of descriptor ring */
-	odpdrv_u32le_t opts1;
-	odpdrv_u32le_t opts2;
-	odpdrv_u64le_t addr;
+	odp_u32le_t opts1;
+	odp_u32le_t opts2;
+	odp_u64le_t addr;
 } r8169_tx_desc_t;
 
 /** Packet socket using mediated r8169 device */
@@ -101,7 +101,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 		uint32_t opts[2];
 		uint32_t status;
 
-		status = odpdrv_le_to_cpu_32(txd->opts1);
+		status = odp_le_to_cpu_32(txd->opts1);
 		if (status & DescOwn)
 			break;
 
@@ -115,7 +115,7 @@ static int r8169_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 				       pkt_r8169->tx_data.vaddr + offset);
 
 		txd->addr =
-		    odpdrv_cpu_to_le_64(pkt_r8169->tx_data.iova + offset);
+		    odp_cpu_to_le_64(pkt_r8169->tx_data.iova + offset);
 		/* FIXME no fragmentation support */
 		opts[0] = DescOwn;
 		opts[0] |= FirstFrag | LastFrag;
@@ -128,8 +128,8 @@ static int r8169_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 
 		status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->tx_next));
 
-		txd->opts1 = odpdrv_cpu_to_le_32(status);
-		txd->opts2 = odpdrv_cpu_to_le_32(opts[1]);
+		txd->opts1 = odp_cpu_to_le_32(status);
+		txd->opts2 = odp_cpu_to_le_32(opts[1]);
 
 		tx_pkts++;
 	}
@@ -339,8 +339,8 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 		uint32_t opts1;
 
 		rxd->addr =
-		    odpdrv_cpu_to_le_64(pkt_r8169->rx_data.iova + offset);
-		rxd->opts2 = odpdrv_cpu_to_le_32(0);
+		    odp_cpu_to_le_64(pkt_r8169->rx_data.iova + offset);
+		rxd->opts2 = odp_cpu_to_le_32(0);
 
 		if (odp_likely(i < pkt_r8169->rx_queue_len - 1)) {
 			opts1 = DescOwn | R8169_RX_BUF_SIZE;
@@ -352,7 +352,7 @@ static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 		num--;
 
 		dma_wmb();
-		rxd->opts1 = odpdrv_cpu_to_le_32(opts1);
+		rxd->opts1 = odp_cpu_to_le_32(opts1);
 	}
 }
 
@@ -375,7 +375,7 @@ static int r8169_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 		uint16_t pkt_len;
 		uint32_t status;
 
-		status = odpdrv_le_to_cpu_32(rxd->opts1);
+		status = odp_le_to_cpu_32(rxd->opts1);
 		if (status & DescOwn)
 			break;
 

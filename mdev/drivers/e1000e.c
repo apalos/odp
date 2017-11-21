@@ -9,12 +9,11 @@
 #include <sys/mman.h>
 #include <linux/types.h>
 
-#include <odp/drv/byteorder.h>
 #include <odp/api/hints.h>
-#include <odp/drv/hints.h>
-
 #include <odp/api/plat/packet_inlines.h>
 #include <odp/api/packet.h>
+
+#include <odp/drv/hints.h>
 
 #include <odp_packet_io_internal.h>
 
@@ -40,24 +39,24 @@
 #define E1000_TDT_OFFSET 0x03818UL
 
 typedef struct {
-	odpdrv_u64le_t buffer_addr;		/* Address of data buffer */
+	odp_u64le_t buffer_addr;		/* Address of data buffer */
 	union {
 #define E1000_TXD_CMD_EOP	0x01000000	/* End of Packet */
 #define E1000_TXD_CMD_IFCS	0x02000000	/* Insert FCS (Ethernet CRC) */
 
-		odpdrv_u32le_t data;
+		odp_u32le_t data;
 		struct {
-			odpdrv_u16le_t length;	/* Data buffer length */
+			odp_u16le_t length;	/* Data buffer length */
 			uint8_t cso;		/* Checksum offset */
 			uint8_t cmd;		/* Descriptor control */
 		} flags;
 	} lower;
 	union {
-		odpdrv_u32le_t data;
+		odp_u32le_t data;
 		struct {
 			uint8_t status;		/* Descriptor status */
 			uint8_t css;		/* Checksum start */
-			odpdrv_u16le_t special;
+			odp_u16le_t special;
 		} fields;
 	} upper;
 } e1000e_tx_desc_t;
@@ -68,26 +67,26 @@ typedef struct {
 
 typedef union {
 	struct {
-		odpdrv_u64le_t buffer_addr;
-		odpdrv_u64le_t reserved;
+		odp_u64le_t buffer_addr;
+		odp_u64le_t reserved;
 	} read;
 	struct {
 		struct {
-			odpdrv_u32le_t mrq;
+			odp_u32le_t mrq;
 			union {
-				odpdrv_u32le_t rss;
+				odp_u32le_t rss;
 				struct {
-					odpdrv_u16le_t ip_id;
-					odpdrv_u16le_t csum;
+					odp_u16le_t ip_id;
+					odp_u16le_t csum;
 				} csum_ip;
 			} hi_dword;
 		} lower;
 		struct {
 #define E1000E_RX_DESC_STAT_DONE	0x00000001UL
 #define E1000E_RX_DESC_STAT_ERR_MASK	0xff000000UL
-			odpdrv_u32le_t status_error;
-			odpdrv_u16le_t length;
-			odpdrv_u16le_t vlan;
+			odp_u32le_t status_error;
+			odp_u16le_t length;
+			odp_u16le_t vlan;
 		} upper;
 	} wb;
 } e1000e_rx_desc_t;
@@ -332,7 +331,7 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 		uint32_t offset = i * E1000E_RX_BUF_SIZE;
 
 		rxd->read.buffer_addr =
-		    odpdrv_cpu_to_le_64(pkt_e1000e->rx_data.iova + offset);
+		    odp_cpu_to_le_64(pkt_e1000e->rx_data.iova + offset);
 
 		i++;
 		if (i == pkt_e1000e->rx_queue_len)
@@ -342,7 +341,7 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 
 	dma_wmb();
 
-	io_write32(odpdrv_cpu_to_le_32(i), pkt_e1000e->mmio + E1000_RDT_OFFSET);
+	io_write32(odp_cpu_to_le_32(i), pkt_e1000e->mmio + E1000_RDT_OFFSET);
 }
 
 static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
@@ -379,7 +378,7 @@ static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 		uint32_t status;
 
 		/* TODO: let the HW drop all erroneous packets */
-		status = odpdrv_le_to_cpu_32(rxd->wb.upper.status_error);
+		status = odp_le_to_cpu_32(rxd->wb.upper.status_error);
 		if (odp_unlikely(status & E1000E_RX_DESC_STAT_ERR_MASK)) {
 			pkt_e1000e->rx_next++;
 			if (pkt_e1000e->rx_next >= pkt_e1000e->rx_queue_len)
@@ -389,7 +388,7 @@ static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 			break;
 		}
 
-		pkt_len = odpdrv_le_to_cpu_16(rxd->wb.upper.length);
+		pkt_len = odp_le_to_cpu_16(rxd->wb.upper.length);
 		pkt = pkt_table[rx_pkts];
 		pkt_hdr = odp_packet_hdr(pkt);
 
@@ -430,7 +429,7 @@ static int e1000e_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 	budget = pkt_e1000e->tx_queue_len - 1;
 	budget -= pkt_e1000e->tx_next;
 	budget +=
-	    odpdrv_le_to_cpu_32(io_read32
+	    odp_le_to_cpu_32(io_read32
 			     (pkt_e1000e->mmio + E1000_TDH_OFFSET));
 	budget &= pkt_e1000e->tx_queue_len - 1;
 
@@ -454,9 +453,9 @@ static int e1000e_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 				       pkt_e1000e->tx_data.vaddr + offset);
 
 		txd->buffer_addr =
-		    odpdrv_cpu_to_le_64(pkt_e1000e->tx_data.iova + offset);
-		txd->lower.data = odpdrv_cpu_to_le_32(txd_cmd | pkt_len);
-		txd->upper.data = odpdrv_cpu_to_le_32(0);
+		    odp_cpu_to_le_64(pkt_e1000e->tx_data.iova + offset);
+		txd->lower.data = odp_cpu_to_le_32(txd_cmd | pkt_len);
+		txd->upper.data = odp_cpu_to_le_32(0);
 
 		pkt_e1000e->tx_next++;
 		if (odp_unlikely
@@ -468,7 +467,7 @@ static int e1000e_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 
 	dma_wmb();
 
-	io_write32(odpdrv_cpu_to_le_32(pkt_e1000e->tx_next),
+	io_write32(odp_cpu_to_le_32(pkt_e1000e->tx_next),
 		   pkt_e1000e->mmio + E1000_TDT_OFFSET);
 
 	if (!pkt_e1000e->lockless_tx)

@@ -9,13 +9,11 @@
 #include <sys/mman.h>
 #include <linux/types.h>
 
-#include <odp/drv/byteorder.h>
 #include <odp/api/hints.h>
-#include <odp/drv/hints.h>
-#include <odp/drv/align.h>
-
 #include <odp/api/plat/packet_inlines.h>
 #include <odp/api/packet.h>
+
+#include <odp/drv/hints.h>
 
 #include <odp_packet_io_internal.h>
 
@@ -54,7 +52,7 @@ typedef struct {
 	uint8_t *rx_data_base;		/**< RX packet payload area VA */
 	uint64_t rx_data_iova;		/**< RX packet payload area IOVA */
 	uint32_t rx_data_size;		/**< RX packet payload area size */
-} i40e_rx_queue_t /* ODPDRV_ALIGNED_CACHE */;
+} i40e_rx_queue_t /* ODP_ALIGNED_CACHE */;
 
 /* TX queue definitions */
 #define I40E_TX_QUEUE_NUM_MAX 32
@@ -73,7 +71,7 @@ typedef struct {
 	uint8_t *tx_data_base;		/**< TX packet payload area VA */
 	uint64_t tx_data_iova;		/**< TX packet payload area IOVA */
 	uint32_t tx_data_size;		/**< TX packet payload area size */
-} i40e_tx_queue_t /* ODPDRV_ALIGNED_CACHE */;
+} i40e_tx_queue_t /* ODP_ALIGNED_CACHE */;
 
 /** Packet socket using mediated i40e device */
 typedef struct {
