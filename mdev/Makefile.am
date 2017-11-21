@@ -13,7 +13,8 @@ AM_CPPFLAGS = \
 lib_LTLIBRARIES = \
 		$(LIB)/libnet_mdev_r8169.la \
 		$(LIB)/libnet_mdev_e1000e.la \
-		$(LIB)/libnet_mdev_cxgb4.la
+		$(LIB)/libnet_mdev_cxgb4.la \
+		$(LIB)/libnet_mdev_i40e.la
 
 noinst_HEADERS = \
 		$(srcdir)/include/mm_api.h \
@@ -44,3 +45,11 @@ __LIB__libnet_mdev_cxgb4_la_SOURCES = \
 		api/sysfs_parse.c \
 		api/eth_stats.c \
 		drivers/cxgb4.c
+
+__LIB__libnet_mdev_i40e_la_SOURCES = \
+		api/mm.c \
+		api/vfio_api.c \
+		api/ethtool_api.c \
+		api/sysfs_parse.c \
+		api/eth_stats.c \
+		drivers/i40e.c
