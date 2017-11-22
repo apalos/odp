@@ -126,7 +126,7 @@ static int i40e_rx_queue_register(pktio_ops_i40e_data_t *pkt_i40e,
 	struct ethtool_ringparam ering;
 	int ret;
 
-	ODP_ASSERT(rxq_idx <= ARRAY_SIZE(pkt_i40e->rx_queues));
+	ODP_ASSERT(rxq_idx < ARRAY_SIZE(pkt_i40e->rx_queues));
 
 	ret = mdev_ringparam_get(&pkt_i40e->mdev, &ering);
 	if (ret) {
@@ -170,7 +170,7 @@ static int i40e_tx_queue_register(pktio_ops_i40e_data_t *pkt_i40e,
 	struct ethtool_ringparam ering;
 	int ret;
 
-	ODP_ASSERT(txq_idx <= ARRAY_SIZE(pkt_i40e->tx_queues));
+	ODP_ASSERT(txq_idx < ARRAY_SIZE(pkt_i40e->tx_queues));
 
 	ret = mdev_ringparam_get(&pkt_i40e->mdev, &ering);
 	if (ret) {

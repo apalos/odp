@@ -214,7 +214,7 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	char path[2048];
 	int ret;
 
-	ODP_ASSERT(rxq_idx <= ARRAY_SIZE(pkt_cxgb4->rx_queues));
+	ODP_ASSERT(rxq_idx < ARRAY_SIZE(pkt_cxgb4->rx_queues));
 
 	memset(path, 0, sizeof(path));
 
@@ -293,7 +293,7 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	char path[2048];
 	int ret;
 
-	ODP_ASSERT(txq_idx <= ARRAY_SIZE(pkt_cxgb4->tx_queues));
+	ODP_ASSERT(txq_idx < ARRAY_SIZE(pkt_cxgb4->tx_queues));
 
 	memset(path, 0, sizeof(path));
 
