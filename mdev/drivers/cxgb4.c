@@ -66,7 +66,7 @@ typedef struct {
 typedef struct {
 	cxgb4_rx_desc_t *rx_descs;	/**< RX queue base */
 
-	odp_u32be_t *doorbell;	/**< Free list refill doorbell */
+	odp_u32be_t *doorbell;		/**< Free list refill doorbell */
 	uint32_t doorbell_key;		/**< 'Key' to the doorbell */
 
 	uint16_t rx_queue_len;		/**< Number of RX desc entries */
@@ -141,7 +141,7 @@ typedef struct {
 	cxgb4_tx_desc_t *tx_descs;	/**< TX queue base */
 	cxgb4_tx_queue_stats *stats;	/**< TX queue stats */
 
-	odp_u32be_t *doorbell;	/**< TX queue doorbell */
+	odp_u32be_t *doorbell;		/**< TX queue doorbell */
 	uint32_t doorbell_key;		/**< 'Key' to the doorbell */
 
 	uint16_t tx_queue_len;		/**< Number of TX desc entries */
