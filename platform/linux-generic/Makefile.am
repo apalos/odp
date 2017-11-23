@@ -252,6 +252,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   pktio/ipc.c \
 			   pktio/loopback.c \
 			   pktio/mdev.c \
+			   pktio/mdev/odp_hexdump.c \
 			   pktio/mdev/cxgb4.c \
 			   pktio/mdev/e1000e.c \
 			   pktio/mdev/i40e.c \

@@ -58,4 +58,6 @@ int vfio_get_region_sparse_mmaps(struct vfio_region_info *region_info,
 int mdev_dma_area_alloc(mdev_device_t *mdev, mdev_dma_area_t *dma_area);
 int mdev_dma_area_free(mdev_device_t *mdev, mdev_dma_area_t *dma_area);
 
+void odp_hexdump(const uint8_t *data, size_t size);
+
 #endif
