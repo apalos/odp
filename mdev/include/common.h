@@ -16,4 +16,6 @@
 	((type *)(void *)(((char *)pointer) - offsetof(type, member)))
 #endif
 
+void odp_hexdump(const uint8_t *data, size_t size);
+
 #endif
