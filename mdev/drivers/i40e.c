@@ -45,6 +45,7 @@ typedef struct {
 /** RX queue data */
 typedef struct {
 	i40e_rx_desc_t *rx_descs;	/**< RX queue base */
+	odp_u32le_t *doorbell;		/**< RX queue doorbell */
 
 	uint16_t rx_queue_len;		/**< Number of RX desc entries */
 	uint16_t rx_next;		/**< Next RX desc to handle */
@@ -64,6 +65,7 @@ typedef struct {
 /** TX queue data */
 typedef struct {
 	i40e_tx_desc_t *tx_descs;	/**< TX queue base */
+	odp_u32le_t *doorbell;		/**< TX queue doorbell */
 
 	uint16_t tx_queue_len;		/**< Number of TX desc entries */
 	uint16_t tx_next;		/**< Next TX desc to insert */
@@ -122,8 +124,10 @@ static int i40e_rx_queue_register(pktio_ops_i40e_data_t *pkt_i40e,
 {
 	uint16_t rxq_idx = pkt_i40e->capa.max_input_queues++;
 	i40e_rx_queue_t *rxq = &pkt_i40e->rx_queues[rxq_idx];
+	uint32_t doorbell_offset;
 	struct iomem rx_data;
 	struct ethtool_ringparam ering;
+	char path[2048];
 	int ret;
 
 	ODP_ASSERT(rxq_idx < ARRAY_SIZE(pkt_i40e->rx_queues));
@@ -134,6 +138,14 @@ static int i40e_rx_queue_register(pktio_ops_i40e_data_t *pkt_i40e,
 		return -1;
 	}
 	rxq->rx_queue_len = ering.rx_pending;
+
+	snprintf(path, sizeof(path) - 1, "queues/rx-%u/i40e/doorbell_offset",
+		 rxq_idx);
+	if (mdev_attr_u32_get(&pkt_i40e->mdev, path, &doorbell_offset) < 0) {
+		ODP_ERR("Cannot get %s\n", path);
+		return -1;
+	}
+	rxq->doorbell = (odp_u32le_t *)(pkt_i40e->mmio + doorbell_offset);
 
 	ODP_ASSERT(rxq->rx_queue_len * sizeof(*rxq->rx_descs) <= size);
 
@@ -166,8 +178,10 @@ static int i40e_tx_queue_register(pktio_ops_i40e_data_t *pkt_i40e,
 {
 	uint16_t txq_idx = pkt_i40e->capa.max_output_queues++;
 	i40e_tx_queue_t *txq = &pkt_i40e->tx_queues[txq_idx];
+	uint32_t doorbell_offset;
 	struct iomem tx_data;
 	struct ethtool_ringparam ering;
+	char path[2048];
 	int ret;
 
 	ODP_ASSERT(txq_idx < ARRAY_SIZE(pkt_i40e->tx_queues));
@@ -178,6 +192,14 @@ static int i40e_tx_queue_register(pktio_ops_i40e_data_t *pkt_i40e,
 		return -1;
 	}
 	txq->tx_queue_len = ering.tx_pending;
+
+	snprintf(path, sizeof(path) - 1, "queues/tx-%u/i40e/doorbell_offset",
+		 txq_idx);
+	if (mdev_attr_u32_get(&pkt_i40e->mdev, path, &doorbell_offset) < 0) {
+		ODP_ERR("Cannot get %s\n", path);
+		return -1;
+	}
+	txq->doorbell = (odp_u32le_t *)(pkt_i40e->mmio + doorbell_offset);
 
 	ODP_ASSERT(txq->tx_queue_len * sizeof(*txq->tx_descs) <= size);
 
