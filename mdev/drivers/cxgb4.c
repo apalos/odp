@@ -666,7 +666,7 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 	/* Determine how many packets will fit in TX queue */
 	budget = txq->tx_queue_len - 1;
 	budget -= txq->tx_next;
-	budget += odp_be_to_cpu_32(txq->stats->cidx);
+	budget += odp_be_to_cpu_16(txq->stats->cidx);
 	budget &= txq->tx_queue_len - 1;
 
 	if (budget > num)
