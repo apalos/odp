@@ -724,6 +724,8 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 		tx_pkts++;
 	}
 
+	dma_wmb();
+
 	/* Ring the doorbell */
 	io_write32(odp_cpu_to_be_32(txq->doorbell_key | tx_pkts),
 		   txq->doorbell);
