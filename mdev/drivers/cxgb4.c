@@ -232,7 +232,7 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 		ODP_ERR("Cannot get %s\n", path);
 		return -1;
 	}
-	rxq->doorbell = (odp_u32be_t *)(pkt_cxgb4->mmio + doorbell_offset);
+	rxq->doorbell = (odp_u32le_t *)(pkt_cxgb4->mmio + doorbell_offset);
 
 	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_key",
 		 rxq_idx);
@@ -310,7 +310,7 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 		ODP_ERR("Cannot get %s\n", path);
 		return -1;
 	}
-	txq->doorbell = (odp_u32be_t *)(pkt_cxgb4->mmio + doorbell_offset);
+	txq->doorbell = (odp_u32le_t *)(pkt_cxgb4->mmio + doorbell_offset);
 
 	snprintf(path, sizeof(path) - 1, "queues/tx-%u/cxgb4/doorbell_key",
 		 txq_idx);
