@@ -124,6 +124,7 @@ typedef struct {
 } cxgb4_sg_pair_t;
 
 typedef struct {
+#define CXGB4_ULP_TX_SC_DSGL (0x82UL << 24)
 	odp_u32be_t sg_pairs_num;
 	odp_u32be_t len0;
 	odp_u64be_t addr0;
@@ -710,10 +711,9 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 		cpl->pack = odp_cpu_to_be_16(0);
 		cpl->len = odp_cpu_to_be_16(pkt_len);
 		cpl->ctrl1 =
-		    odp_cpu_to_be_64(TXPKT_L4CSUM_DIS_F |
-					TXPKT_IPCSUM_DIS_F);
+		    odp_cpu_to_be_64(TXPKT_L4CSUM_DIS_F | TXPKT_IPCSUM_DIS_F);
 
-		sgl->sg_pairs_num = odp_cpu_to_be_32(0);
+		sgl->sg_pairs_num = odp_cpu_to_be_32(CXGB4_ULP_TX_SC_DSGL | 1);
 		sgl->addr0 = odp_cpu_to_be_64(txq->tx_data_iova + offset);
 		sgl->len0 = odp_cpu_to_be_32(pkt_len);
 
