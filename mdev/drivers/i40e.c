@@ -59,7 +59,7 @@ typedef struct {
 #define I40E_TX_QUEUE_NUM_MAX 32
 
 typedef struct {
-	uint64_t padding[4];
+	uint64_t padding[2];
 } i40e_tx_desc_t;
 
 /** TX queue data */
@@ -69,6 +69,8 @@ typedef struct {
 
 	uint16_t tx_queue_len;		/**< Number of TX desc entries */
 	uint16_t tx_next;		/**< Next TX desc to insert */
+
+	odp_u32le_t *cidx;		/**< Last TX desc processed by HW */
 
 	uint8_t *tx_data_base;		/**< TX packet payload area VA */
 	uint64_t tx_data_iova;		/**< TX packet payload area IOVA */
@@ -201,13 +203,16 @@ static int i40e_tx_queue_register(pktio_ops_i40e_data_t *pkt_i40e,
 	}
 	txq->doorbell = (odp_u32le_t *)(pkt_i40e->mmio + doorbell_offset);
 
-	ODP_ASSERT(txq->tx_queue_len * sizeof(*txq->tx_descs) <= size);
+	ODP_ASSERT(txq->tx_queue_len * sizeof(*txq->tx_descs) +
+		   sizeof(*txq->cidx) <= size);
 
 	txq->tx_descs = mdev_region_mmap(&pkt_i40e->mdev, offset, size);
 	if (txq->tx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap TX queue\n");
 		return -1;
 	}
+
+	txq->cidx = (odp_u32le_t *)(txq->tx_descs + txq->tx_queue_len);
 
 	tx_data.size = txq->tx_queue_len * I40E_TX_BUF_SIZE;
 	ret = iomem_alloc_dma(&pkt_i40e->mdev, &tx_data);
