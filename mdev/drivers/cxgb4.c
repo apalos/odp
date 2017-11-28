@@ -33,6 +33,9 @@
 
 #define CXGB4_TX_BUF_SIZE 2048U
 
+#define CXGB4_TX_INLINE_MAX (256 - sizeof(cxgb4_fw_eth_tx_pkt_wr_t) \
+				 - sizeof(cxgb4_cpl_tx_pkt_core_t))
+
 /* RX queue definitions */
 #define CXGB4_RX_QUEUE_NUM_MAX 32
 
@@ -658,7 +661,7 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 {
 	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
 	cxgb4_tx_queue_t *txq = &pkt_cxgb4->tx_queues[txq_idx];
-	uint16_t budget;
+	uint16_t budget, tx_txds = 0;
 	int tx_pkts = 0;
 
 	if (!pkt_cxgb4->lockless_tx)
@@ -670,56 +673,93 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 	budget += odp_be_to_cpu_16(txq->stats->cidx);
 	budget &= txq->tx_queue_len - 1;
 
-	if (budget > num)
-		budget = num;
-
-	while (tx_pkts < budget) {
-		volatile cxgb4_tx_desc_t *txd = &txq->tx_descs[txq->tx_next];
-		uint32_t offset = txq->tx_next * CXGB4_TX_BUF_SIZE;
+	while (budget && tx_pkts < num) {
 		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
 
-		volatile cxgb4_fw_eth_tx_pkt_wr_t *wr;
-		volatile cxgb4_cpl_tx_pkt_core_t *cpl;
-		volatile cxgb4_sg_list_t *sgl;
+		cxgb4_tx_desc_t *txd = &txq->tx_descs[txq->tx_next];
+		uint32_t txd_len;
+
+		cxgb4_fw_eth_tx_pkt_wr_t *wr;
+		cxgb4_cpl_tx_pkt_core_t *cpl;
+		uint32_t op_immdlen;
 
 		/* Skip oversized packets silently */
 		if (odp_unlikely(pkt_len > CXGB4_TX_BUF_SIZE)) {
-			/*
-			 * TODO: doorbell update won't work properly ...
-			 * Preferably get rid of this check entirely.
-			 */
-			ODP_ASSERT(1);
 			tx_pkts++;
 			continue;
 		}
 
-		wr = (volatile cxgb4_fw_eth_tx_pkt_wr_t *)txd;
-		cpl = (volatile cxgb4_cpl_tx_pkt_core_t *)(wr + 1);
-		sgl = (volatile cxgb4_sg_list_t *)(cpl + 1);
+		wr = (cxgb4_fw_eth_tx_pkt_wr_t *)txd;
+		cpl = (cxgb4_cpl_tx_pkt_core_t *)(wr + 1);
 
-		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
-				       txq->tx_data_base + offset);
+		txd_len = sizeof(*wr) + sizeof(*cpl);
+		op_immdlen = CXGB4_FW_ETH_TX_PKT_WR | sizeof(*cpl);
 
-		wr->op_immdlen =
-		    odp_cpu_to_be_32(CXGB4_FW_ETH_TX_PKT_WR | sizeof(*cpl));
-		wr->equiq_to_len16 = odp_cpu_to_be_32(3);
+		if (pkt_len <= CXGB4_TX_INLINE_MAX) {
+			uint8_t *pos;
+			uint32_t left;
+
+			txd_len += pkt_len;
+
+			/* Try next time */
+			if (DIV_ROUND_UP(txd_len, sizeof(*txd)) > budget)
+				break;
+
+			op_immdlen += pkt_len;
+
+			/* Packet copying shall take care of wrapping */
+			pos = (uint8_t *)(cpl + 1);
+			left = (uint8_t *)(txq->tx_descs + txq->tx_queue_len) -
+			    pos;
+
+			if (odp_likely(left >= pkt_len)) {
+				odp_packet_copy_to_mem(pkt_table[tx_pkts], 0,
+						       pkt_len, pos);
+			} else {
+				odp_packet_copy_to_mem(pkt_table[tx_pkts], 0,
+						       left, pos);
+				odp_packet_copy_to_mem(pkt_table[tx_pkts], left,
+						       pkt_len - left,
+						       &txq->tx_descs[0]);
+			}
+		} else {
+			uint32_t offset = txq->tx_next * CXGB4_TX_BUF_SIZE;
+			cxgb4_sg_list_t *sgl;
+
+			txd_len += sizeof(*sgl);
+
+			odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
+					       txq->tx_data_base + offset);
+
+			sgl = (cxgb4_sg_list_t *)(cpl + 1);
+
+			sgl->sg_pairs_num =
+			    odp_cpu_to_be_32(CXGB4_ULP_TX_SC_DSGL | 1);
+			sgl->addr0 =
+			    odp_cpu_to_be_64(txq->tx_data_iova + offset);
+			sgl->len0 = odp_cpu_to_be_32(pkt_len);
+		}
+
+		wr->op_immdlen = odp_cpu_to_be_32(op_immdlen);
+		wr->equiq_to_len16 =
+		    odp_cpu_to_be_32(DIV_ROUND_UP(txd_len, 16));
 		wr->r3 = odp_cpu_to_be_64(0);
 
-		cpl->ctrl0 = odp_cpu_to_be_32(CPL_TX_PKT_XT |
-				TXPKT_INTF_V(pkt_cxgb4->tx_channel) |
-				TXPKT_PF_V(pkt_cxgb4->phys_function));
+		cpl->ctrl0 =
+		    odp_cpu_to_be_32(CPL_TX_PKT_XT |
+				     TXPKT_INTF_V(pkt_cxgb4->tx_channel) |
+				     TXPKT_PF_V(pkt_cxgb4->phys_function));
 		cpl->pack = odp_cpu_to_be_16(0);
 		cpl->len = odp_cpu_to_be_16(pkt_len);
 		cpl->ctrl1 =
 		    odp_cpu_to_be_64(TXPKT_L4CSUM_DIS_F | TXPKT_IPCSUM_DIS_F);
 
-		sgl->sg_pairs_num = odp_cpu_to_be_32(CXGB4_ULP_TX_SC_DSGL | 1);
-		sgl->addr0 = odp_cpu_to_be_64(txq->tx_data_iova + offset);
-		sgl->len0 = odp_cpu_to_be_32(pkt_len);
-
-		txq->tx_next++;
+		txq->tx_next += DIV_ROUND_UP(txd_len, sizeof(*txd));
 		if (odp_unlikely(txq->tx_next >= txq->tx_queue_len))
-			txq->tx_next = 0;
+			txq->tx_next -= txq->tx_queue_len;
+
+		tx_txds += DIV_ROUND_UP(txd_len, sizeof(*txd));
+		budget -= DIV_ROUND_UP(txd_len, sizeof(*txd));
 
 		tx_pkts++;
 	}
@@ -727,7 +767,7 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 	dma_wmb();
 
 	/* Ring the doorbell */
-	io_write32(odp_cpu_to_le_32(txq->doorbell_key | tx_pkts),
+	io_write32(odp_cpu_to_le_32(txq->doorbell_key | tx_txds),
 		   txq->doorbell);
 
 	if (!pkt_cxgb4->lockless_tx)

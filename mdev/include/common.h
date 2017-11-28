@@ -16,6 +16,10 @@
 	((type *)(void *)(((char *)pointer) - offsetof(type, member)))
 #endif
 
+/* FIXME: make sure __builtin_constant_p(divisor) && (divisor == 2^n) */
+#define DIV_ROUND_UP(x, divisor) \
+	(((x) + (divisor) - 1) >> __builtin_ctz(divisor))
+
 void odp_hexdump(const uint8_t *data, size_t size);
 
 #endif
