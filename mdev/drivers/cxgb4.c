@@ -597,7 +597,7 @@ static int cxgb4_recv(pktio_entry_t *pktio_entry,
 			ret = -1;
 
 		offset = 0;
-		while (offset <= pkt_len) {
+		while (offset < pkt_len) {
 			void *from =
 			    rxq->rx_data_base + rxq->cidx * ODP_PAGE_SIZE +
 			    rxq->offset;
