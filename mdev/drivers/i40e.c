@@ -34,6 +34,8 @@
 #define I40E_TX_BUF_SIZE 2048U
 #define I40E_RX_BUF_SIZE 2048U
 
+#define I40E_TX_PACKET_LEN_MIN 17
+
 /* RX queue definitions */
 #define I40E_RX_QUEUE_NUM_MAX 32
 
@@ -59,7 +61,18 @@ typedef struct {
 #define I40E_TX_QUEUE_NUM_MAX 32
 
 typedef struct {
-	uint64_t padding[2];
+	odp_u64le_t addr;
+
+#define I40E_TXD_DTYPE_DATA	0UL
+
+#define I40E_TXD_CMD_ICRC	0x0004UL
+#define I40E_TXD_CMD_EOP	0x0001UL
+
+#define I40E_TXD_QW1_CMD_S	4
+#define I40E_TXD_QW1_L2TAG1_S	48
+#define I40E_TXD_QW1_OFFSET_S	16
+#define I40E_TXD_QW1_SIZE_S	34
+	odp_u64le_t cmd_type_offset_size;
 } i40e_tx_desc_t;
 
 /** TX queue data */
@@ -371,16 +384,74 @@ static int i40e_recv(pktio_entry_t *pktio_entry, int rxq_idx,
 	return rx_pkts;
 }
 
+static uint64_t txd_ctos(uint32_t cmd, uint32_t tag, uint32_t offset,
+			 uint32_t size)
+{
+	return I40E_TXD_DTYPE_DATA |
+	    ((uint64_t)cmd << I40E_TXD_QW1_CMD_S) |
+	    ((uint64_t)tag << I40E_TXD_QW1_L2TAG1_S) |
+	    ((uint64_t)offset << I40E_TXD_QW1_OFFSET_S) |
+	    ((uint64_t)size << I40E_TXD_QW1_SIZE_S);
+}
+
 static int i40e_send(pktio_entry_t *pktio_entry, int txq_idx,
-		     const odp_packet_t pkt_table[]ODP_UNUSED,
-		     int num ODP_UNUSED)
+		     const odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_i40e_data_t *pkt_i40e = odp_ops_data(pktio_entry, i40e);
-	i40e_tx_queue_t *txq ODP_UNUSED = &pkt_i40e->tx_queues[txq_idx];
+	i40e_tx_queue_t *txq = &pkt_i40e->tx_queues[txq_idx];
+	uint16_t budget, tx_txds = 0;
 	int tx_pkts = 0;
 
 	if (!pkt_i40e->lockless_tx)
 		odp_ticketlock_lock(&pkt_i40e->tx_locks[txq_idx]);
+
+	/* Determine how many packets will fit in TX queue */
+	budget = txq->tx_queue_len - 1;
+	budget -= txq->tx_next;
+	budget += odp_le_to_cpu_32(*txq->cidx);
+	budget &= txq->tx_queue_len - 1;
+
+	while (tx_txds < budget && tx_pkts < num) {
+		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
+		uint32_t offset = txq->tx_next * I40E_TX_BUF_SIZE;
+
+		i40e_tx_desc_t *txd = &txq->tx_descs[txq->tx_next];
+		uint32_t txd_len = sizeof(*txd);
+
+		uint32_t txd_cmd = I40E_TXD_CMD_ICRC | I40E_TXD_CMD_EOP;
+
+		/* Skip undersized packets silently */
+		if (odp_unlikely(pkt_len < I40E_TX_PACKET_LEN_MIN)) {
+			tx_pkts++;
+			continue;
+		}
+
+		/* Skip oversized packets silently */
+		if (odp_unlikely(pkt_len > I40E_TX_BUF_SIZE)) {
+			tx_pkts++;
+			continue;
+		}
+
+		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
+				       txq->tx_data_base + offset);
+
+		txd->addr = odp_cpu_to_le_64(txq->tx_data_iova + offset);
+		txd->cmd_type_offset_size =
+		    odp_cpu_to_le_64(txd_ctos(txd_cmd, 0, 0, pkt_len));
+
+		txq->tx_next += DIV_ROUND_UP(txd_len, sizeof(*txd));
+		if (odp_unlikely(txq->tx_next >= txq->tx_queue_len))
+			txq->tx_next -= txq->tx_queue_len;
+
+		tx_txds += DIV_ROUND_UP(txd_len, sizeof(*txd));
+
+		tx_pkts++;
+	}
+
+	dma_wmb();
+
+	/* Ring the doorbell */
+	io_write32(odp_cpu_to_le_32(txq->tx_next), txq->doorbell);
 
 	if (!pkt_i40e->lockless_tx)
 		odp_ticketlock_unlock(&pkt_i40e->tx_locks[txq_idx]);
