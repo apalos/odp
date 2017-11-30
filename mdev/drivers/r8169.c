@@ -434,6 +434,15 @@ static void r8169_wait_link_up(pktio_entry_t *pktio_entry)
 		sleep(1);
 }
 
+static int r8169_capability(pktio_entry_t *pktio_entry,
+			    odp_pktio_capability_t *capa)
+{
+	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
+
+	*capa = pkt_r8169->capa;
+	return 0;
+}
+
 static pktio_ops_module_t r8169_pktio_ops = {
 	.base = {
 		 .name = MODULE_NAME,
@@ -446,6 +455,8 @@ static pktio_ops_module_t r8169_pktio_ops = {
 	.send = r8169_send,
 
 	.link_status = r8169_link_status,
+
+	.capability = r8169_capability,
 };
 
 /** r8169 module entry point */

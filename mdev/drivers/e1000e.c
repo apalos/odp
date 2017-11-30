@@ -497,6 +497,15 @@ static void e1000e_wait_link_up(pktio_entry_t *pktio_entry)
 		sleep(1);
 }
 
+static int e1000e_capability(pktio_entry_t *pktio_entry,
+			     odp_pktio_capability_t *capa)
+{
+	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
+
+	*capa = pkt_e1000e->capa;
+	return 0;
+}
+
 static pktio_ops_module_t e1000e_pktio_ops = {
 	.base = {
 		 .name = MODULE_NAME,
@@ -509,6 +518,8 @@ static pktio_ops_module_t e1000e_pktio_ops = {
 	.send = e1000e_send,
 
 	.link_status = e1000e_link_status,
+
+	.capability = e1000e_capability,
 };
 
 /** e1000e module entry point */

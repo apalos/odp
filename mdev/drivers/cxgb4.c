@@ -792,6 +792,15 @@ static void cxgb4_wait_link_up(pktio_entry_t *pktio_entry)
 		sleep(1);
 }
 
+static int cxgb4_capability(pktio_entry_t *pktio_entry,
+			    odp_pktio_capability_t *capa)
+{
+	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
+
+	*capa = pkt_cxgb4->capa;
+	return 0;
+}
+
 static pktio_ops_module_t cxgb4_pktio_ops = {
 	.base = {
 		 .name = MODULE_NAME,
@@ -804,6 +813,8 @@ static pktio_ops_module_t cxgb4_pktio_ops = {
 	.send = cxgb4_send,
 
 	.link_status = cxgb4_link_status,
+
+	.capability = cxgb4_capability,
 };
 
 /** cxgb4 module entry point */

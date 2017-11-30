@@ -475,6 +475,15 @@ static void i40e_wait_link_up(pktio_entry_t *pktio_entry)
 		sleep(1);
 }
 
+static int i40e_capability(pktio_entry_t *pktio_entry,
+			   odp_pktio_capability_t *capa)
+{
+	pktio_ops_i40e_data_t *pkt_i40e = odp_ops_data(pktio_entry, i40e);
+
+	*capa = pkt_i40e->capa;
+	return 0;
+}
+
 static pktio_ops_module_t i40e_pktio_ops = {
 	.base = {
 		 .name = MODULE_NAME,
@@ -487,6 +496,8 @@ static pktio_ops_module_t i40e_pktio_ops = {
 	.send = i40e_send,
 
 	.link_status = i40e_link_status,
+
+	.capability = i40e_capability,
 };
 
 /** i40e module entry point */
