@@ -50,7 +50,7 @@ typedef struct {
 	odp_u32le_t *doorbell;		/**< RX queue doorbell */
 
 	uint16_t rx_queue_len;		/**< Number of RX desc entries */
-	uint16_t rx_next;		/**< Next RX desc to handle */
+	uint16_t cidx;			/**< Next RX desc to handle */
 
 	uint8_t *rx_data_base;		/**< RX packet payload area VA */
 	uint64_t rx_data_iova;		/**< RX packet payload area IOVA */
@@ -81,7 +81,7 @@ typedef struct {
 	odp_u32le_t *doorbell;		/**< TX queue doorbell */
 
 	uint16_t tx_queue_len;		/**< Number of TX desc entries */
-	uint16_t tx_next;		/**< Next TX desc to insert */
+	uint16_t pidx;			/**< Next TX desc to insert */
 
 	odp_u32le_t *cidx;		/**< Last TX desc processed by HW */
 
@@ -407,15 +407,15 @@ static int i40e_send(pktio_entry_t *pktio_entry, int txq_idx,
 
 	/* Determine how many packets will fit in TX queue */
 	budget = txq->tx_queue_len - 1;
-	budget -= txq->tx_next;
+	budget -= txq->pidx;
 	budget += odp_le_to_cpu_32(*txq->cidx);
 	budget &= txq->tx_queue_len - 1;
 
 	while (tx_txds < budget && tx_pkts < num) {
 		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
-		uint32_t offset = txq->tx_next * I40E_TX_BUF_SIZE;
+		uint32_t offset = txq->pidx * I40E_TX_BUF_SIZE;
 
-		i40e_tx_desc_t *txd = &txq->tx_descs[txq->tx_next];
+		i40e_tx_desc_t *txd = &txq->tx_descs[txq->pidx];
 		uint32_t txd_len = sizeof(*txd);
 
 		uint32_t txd_cmd = I40E_TXD_CMD_ICRC | I40E_TXD_CMD_EOP;
@@ -439,9 +439,9 @@ static int i40e_send(pktio_entry_t *pktio_entry, int txq_idx,
 		txd->cmd_type_offset_size =
 		    odp_cpu_to_le_64(txd_ctos(txd_cmd, 0, 0, pkt_len));
 
-		txq->tx_next += DIV_ROUND_UP(txd_len, sizeof(*txd));
-		if (odp_unlikely(txq->tx_next >= txq->tx_queue_len))
-			txq->tx_next -= txq->tx_queue_len;
+		txq->pidx += DIV_ROUND_UP(txd_len, sizeof(*txd));
+		if (odp_unlikely(txq->pidx >= txq->tx_queue_len))
+			txq->pidx -= txq->tx_queue_len;
 
 		tx_txds += DIV_ROUND_UP(txd_len, sizeof(*txd));
 
@@ -451,7 +451,7 @@ static int i40e_send(pktio_entry_t *pktio_entry, int txq_idx,
 	dma_wmb();
 
 	/* Ring the doorbell */
-	io_write32(odp_cpu_to_le_32(txq->tx_next), txq->doorbell);
+	io_write32(odp_cpu_to_le_32(txq->pidx), txq->doorbell);
 
 	if (!pkt_i40e->lockless_tx)
 		odp_ticketlock_unlock(&pkt_i40e->tx_locks[txq_idx]);

@@ -59,7 +59,7 @@ typedef struct {
 	odp_ticketlock_t rx_lock;	/**< RX queue lock */
 	r8169_rx_desc_t *rx_descs;	/**< RX queue mmap */
 	struct iomem rx_data;		/**< RX packet payload mmap */
-	uint16_t rx_next;		/**< next entry in RX queue to use */
+	uint16_t cidx;			/**< next entry in RX queue to use */
 	uint16_t rx_queue_len;		/**< Number of RX desc entries */
 
 	/* TX queue hot data */
@@ -67,7 +67,7 @@ typedef struct {
 	odp_ticketlock_t tx_lock;	/**< TX queue lock */
 	r8169_tx_desc_t *tx_descs;	/**< TX queue mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
-	uint16_t tx_next;		/**< next entry in TX queue to use */
+	uint16_t pidx;			/**< next entry in TX queue to use */
 	uint16_t tx_queue_len;		/**< Number of TX desc entries */
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
@@ -95,9 +95,9 @@ static int r8169_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 
 	while (tx_pkts < num) {
 		volatile r8169_tx_desc_t *txd =
-			&pkt_r8169->tx_descs[pkt_r8169->tx_next];
+			&pkt_r8169->tx_descs[pkt_r8169->pidx];
 		uint32_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
-		uint32_t offset = pkt_r8169->tx_next * R8169_TX_BUF_SIZE;
+		uint32_t offset = pkt_r8169->pidx * R8169_TX_BUF_SIZE;
 		uint32_t opts[2];
 		uint32_t status;
 
@@ -122,11 +122,11 @@ static int r8169_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 		/* FIXME No vlan support */
 		opts[1] = 0;
 
-		pkt_r8169->tx_next++;
-		if (odp_unlikely(pkt_r8169->tx_next >= pkt_r8169->tx_queue_len))
-			pkt_r8169->tx_next = 0;
+		pkt_r8169->pidx++;
+		if (odp_unlikely(pkt_r8169->pidx >= pkt_r8169->tx_queue_len))
+			pkt_r8169->pidx = 0;
 
-		status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->tx_next));
+		status = opts[0] | pkt_len | (RingEnd * !(pkt_r8169->pidx));
 
 		txd->opts1 = odp_cpu_to_le_32(status);
 		txd->opts2 = odp_cpu_to_le_32(opts[1]);
@@ -365,11 +365,11 @@ static int r8169_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 	int ret;
 
 	/* Keep track of the start point to refill RX queue */
-	refill_from = pkt_r8169->rx_next;
+	refill_from = pkt_r8169->cidx;
 
 	while (rx_pkts < num) {
 		volatile r8169_rx_desc_t *rxd =
-		    &pkt_r8169->rx_descs[pkt_r8169->rx_next];
+		    &pkt_r8169->rx_descs[pkt_r8169->cidx];
 		odp_packet_hdr_t *pkt_hdr;
 		odp_packet_t pkt;
 		uint16_t pkt_len;
@@ -398,8 +398,9 @@ static int r8169_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 
 		ret = odp_packet_copy_from_mem(pkt, 0, pkt_len,
 					       pkt_r8169->rx_data.vaddr +
-					       pkt_r8169->rx_next *
+					       pkt_r8169->cidx *
 					       R8169_RX_BUF_SIZE);
+
 		if (odp_unlikely(ret != 0)) {
 			odp_packet_free(pkt);
 			break;
@@ -407,9 +408,9 @@ static int r8169_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 
 		pkt_hdr->input = pktio_entry->s.handle;
 
-		pkt_r8169->rx_next++;
-		if (odp_unlikely(pkt_r8169->rx_next >= pkt_r8169->rx_queue_len))
-			pkt_r8169->rx_next = 0;
+		pkt_r8169->cidx++;
+		if (odp_unlikely(pkt_r8169->cidx >= pkt_r8169->rx_queue_len))
+			pkt_r8169->cidx = 0;
 
 		pkt_table[rx_pkts] = pkt;
 		rx_pkts++;

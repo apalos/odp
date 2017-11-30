@@ -103,7 +103,7 @@ typedef struct {
 	odp_ticketlock_t rx_lock;	/**< RX queue lock */
 	e1000e_rx_desc_t *rx_descs;	/**< RX queue mmap */
 	struct iomem rx_data;		/**< RX packet payload mmap */
-	uint16_t rx_next;		/**< next entry in RX queue to use */
+	uint16_t cidx;			/**< next entry in RX queue to use */
 	uint16_t rx_queue_len;		/**< Number of RX desc entries */
 
 	/* TX queue hot data */
@@ -111,7 +111,7 @@ typedef struct {
 	odp_ticketlock_t tx_lock;	/**< TX queue lock */
 	e1000e_tx_desc_t *tx_descs;	/**< TX queue mmap */
 	struct iomem tx_data;		/**< TX packet payload mmap */
-	uint16_t tx_next;		/**< next entry in TX queue to use */
+	uint16_t pidx;			/**< next entry in TX queue to use */
 	uint16_t tx_queue_len;		/**< Number of TX desc entries */
 
 	odp_pktio_capability_t capa;	/**< interface capabilities */
@@ -353,14 +353,14 @@ static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 	int rx_pkts = 0;
 
 	/* Keep track of the start point to refill RX queue */
-	refill_from = pkt_e1000e->rx_next;
+	refill_from = pkt_e1000e->cidx;
 
 	/*
 	 * Determine how many packets are available in RX queue:
 	 *     (Write_index - Read_index) modulo RX queue size
 	 */
 	budget += io_read32(pkt_e1000e->mmio + E1000_RDH_OFFSET);
-	budget -= pkt_e1000e->rx_next;
+	budget -= pkt_e1000e->cidx;
 	budget &= pkt_e1000e->rx_queue_len - 1;
 
 	if (budget > num)
@@ -371,7 +371,7 @@ static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 
 	while (rx_pkts < budget) {
 		volatile e1000e_rx_desc_t *rxd =
-		    &pkt_e1000e->rx_descs[pkt_e1000e->rx_next];
+		    &pkt_e1000e->rx_descs[pkt_e1000e->cidx];
 		odp_packet_hdr_t *pkt_hdr;
 		odp_packet_t pkt;
 		uint16_t pkt_len;
@@ -380,9 +380,9 @@ static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 		/* TODO: let the HW drop all erroneous packets */
 		status = odp_le_to_cpu_32(rxd->wb.upper.status_error);
 		if (odp_unlikely(status & E1000E_RX_DESC_STAT_ERR_MASK)) {
-			pkt_e1000e->rx_next++;
-			if (pkt_e1000e->rx_next >= pkt_e1000e->rx_queue_len)
-				pkt_e1000e->rx_next = 0;
+			pkt_e1000e->cidx++;
+			if (pkt_e1000e->cidx >= pkt_e1000e->rx_queue_len)
+				pkt_e1000e->cidx = 0;
 			odp_packet_free_multi(&pkt_table[rx_pkts],
 					      budget - rx_pkts);
 			break;
@@ -397,15 +397,13 @@ static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 		/* FIXME: check return value  */
 		odp_packet_copy_from_mem(pkt, 0, pkt_len,
 					 pkt_e1000e->rx_data.vaddr +
-					 pkt_e1000e->rx_next *
-					 E1000E_RX_BUF_SIZE);
+					 pkt_e1000e->cidx * E1000E_RX_BUF_SIZE);
 
 		pkt_hdr->input = pktio_entry->s.handle;
 
-		pkt_e1000e->rx_next++;
-		if (odp_unlikely
-		    (pkt_e1000e->rx_next >= pkt_e1000e->rx_queue_len))
-			pkt_e1000e->rx_next = 0;
+		pkt_e1000e->cidx++;
+		if (odp_unlikely(pkt_e1000e->cidx >= pkt_e1000e->rx_queue_len))
+			pkt_e1000e->cidx = 0;
 
 		rx_pkts++;
 	}
@@ -427,7 +425,7 @@ static int e1000e_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 
 	/* Determine how many packets will fit in TX queue */
 	budget = pkt_e1000e->tx_queue_len - 1;
-	budget -= pkt_e1000e->tx_next;
+	budget -= pkt_e1000e->pidx;
 	budget +=
 	    odp_le_to_cpu_32(io_read32
 			     (pkt_e1000e->mmio + E1000_TDH_OFFSET));
@@ -438,9 +436,9 @@ static int e1000e_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 
 	while (tx_pkts < budget) {
 		volatile e1000e_tx_desc_t *txd =
-		    &pkt_e1000e->tx_descs[pkt_e1000e->tx_next];
+		    &pkt_e1000e->tx_descs[pkt_e1000e->pidx];
 		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
-		uint32_t offset = pkt_e1000e->tx_next * E1000E_TX_BUF_SIZE;
+		uint32_t offset = pkt_e1000e->pidx * E1000E_TX_BUF_SIZE;
 		uint32_t txd_cmd = E1000_TXD_CMD_IFCS | E1000_TXD_CMD_EOP;
 
 		/* Skip oversized packets silently */
@@ -457,17 +455,17 @@ static int e1000e_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 		txd->lower.data = odp_cpu_to_le_32(txd_cmd | pkt_len);
 		txd->upper.data = odp_cpu_to_le_32(0);
 
-		pkt_e1000e->tx_next++;
+		pkt_e1000e->pidx++;
 		if (odp_unlikely
-		    (pkt_e1000e->tx_next >= pkt_e1000e->tx_queue_len))
-			pkt_e1000e->tx_next = 0;
+		    (pkt_e1000e->pidx >= pkt_e1000e->tx_queue_len))
+			pkt_e1000e->pidx = 0;
 
 		tx_pkts++;
 	}
 
 	dma_wmb();
 
-	io_write32(odp_cpu_to_le_32(pkt_e1000e->tx_next),
+	io_write32(odp_cpu_to_le_32(pkt_e1000e->pidx),
 		   pkt_e1000e->mmio + E1000_TDT_OFFSET);
 
 	if (!pkt_e1000e->lockless_tx)
