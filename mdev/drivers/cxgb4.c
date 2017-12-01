@@ -272,6 +272,7 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	rxq->rx_data_base = rx_data.vaddr;
 	rxq->rx_data_iova = rx_data.iova;
 	rxq->rx_data_size = rx_data.size;
+	rxq->gen = 1;
 
 	/*
 	 * Leave 1 HW block (8 entries) unpopulated,
