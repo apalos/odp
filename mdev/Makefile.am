@@ -1,3 +1,4 @@
+if mdev
 LIB = $(top_builddir)/lib
 
 AM_CPPFLAGS = \
@@ -57,3 +58,4 @@ __LIB__libnet_mdev_i40e_la_SOURCES = \
 		api/eth_stats.c \
 		api/odp_hexdump.c \
 		drivers/i40e.c
+endif
