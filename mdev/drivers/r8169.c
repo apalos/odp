@@ -79,10 +79,66 @@ typedef struct {
 	mdev_device_t mdev;		/**< Common mdev data */
 } pktio_ops_r8169_data_t;
 
+
 static void r8169_rx_refill(pktio_ops_r8169_data_t *pkt_r8169,
 			    uint16_t from, uint16_t num);
 static void r8169_wait_link_up(pktio_entry_t *pktio_entry);
 static int r8169_close(pktio_entry_t *pktio_entry);
+
+static int hw_flood = 0;
+/*
+ * Bypass ODP and flood hardware Tx queues
+ * Used only to stress hw and reach silicon limits
+ * packets will not be counted on odp_* applications
+ * they will *only* be visible via ethtool -S assuming it's
+ * properly supported by the NICs linux driver
+ */
+static void r8169_tx_flood(pktio_entry_t *pktio_entry)
+{
+	pktio_ops_r8169_data_t *pkt_r8169 = odp_ops_data(pktio_entry, r8169);
+	int tx_pkts;
+
+	while (1) {
+		tx_pkts = 0;
+		while (tx_pkts < pkt_r8169->tx_queue_len) {
+			volatile r8169_tx_desc_t *txd =
+				&pkt_r8169->tx_descs[pkt_r8169->pidx];
+			uint32_t pkt_len = 46;
+			uint32_t offset =
+				pkt_r8169->pidx * R8169_TX_BUF_SIZE;
+			uint32_t opts[2];
+			uint32_t status;
+
+			status = odp_le_to_cpu_32(txd->opts1);
+			if (status & DescOwn)
+				break;
+			txd->addr =
+				odp_cpu_to_le_64(pkt_r8169->tx_data.iova +
+				offset);
+			/* FIXME no fragmentation support */
+			opts[0] = DescOwn;
+			opts[0] |= FirstFrag | LastFrag;
+			/* FIXME No vlan support */
+			opts[1] = 0;
+
+			pkt_r8169->pidx++;
+			if (odp_unlikely
+				(pkt_r8169->pidx >= pkt_r8169->tx_queue_len))
+				pkt_r8169->pidx = 0;
+
+			status = opts[0] | pkt_len |
+				(RingEnd * !(pkt_r8169->pidx));
+
+			txd->opts1 = odp_cpu_to_le_32(status);
+			txd->opts2 = odp_cpu_to_le_32(opts[1]);
+
+			tx_pkts++;
+		}
+
+		dma_wmb();
+		io_write8(R8169_NPQ, (char *)pkt_r8169->mmio + R8169_TXPOLL);
+	}
+}
 
 static int r8169_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 		      const odp_packet_t pkt_table[] ODP_UNUSED, int num)
@@ -92,6 +148,9 @@ static int r8169_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 
 	if (!pkt_r8169->lockless_tx)
 		odp_ticketlock_lock(&pkt_r8169->tx_lock);
+
+	if (hw_flood)
+		r8169_tx_flood(pktio_entry);
 
 	while (tx_pkts < num) {
 		volatile r8169_tx_desc_t *txd =
