@@ -227,6 +227,7 @@ static int e1000e_rx_queue_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 		return -1;
 	}
 
+	/* Need 1 desc gap to keep tail from touching head */
 	e1000e_rx_refill(pkt_e1000e, 0, pkt_e1000e->rx_queue_len - 1);
 
 	pkt_e1000e->capa.max_input_queues++;
@@ -378,24 +379,22 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 {
 	uint16_t i = from;
 
-	/* Need 1 desc gap to keep tail from touching head */
-	ODP_ASSERT(num < pkt_e1000e->rx_queue_len);
-
 	while (num) {
+		uint64_t iova =
+		    pkt_e1000e->rx_data.iova + i * E1000E_RX_BUF_SIZE;
 		e1000e_rx_desc_t *rxd = &pkt_e1000e->rx_descs[i];
-		uint32_t offset = i * E1000E_RX_BUF_SIZE;
 
-		rxd->read.buffer_addr =
-		    odp_cpu_to_le_64(pkt_e1000e->rx_data.iova + offset);
+		rxd->read.buffer_addr = odp_cpu_to_le_64(iova);
 
 		i++;
-		if (i == pkt_e1000e->rx_queue_len)
+		if (i >= pkt_e1000e->rx_queue_len)
 			i = 0;
+
 		num--;
 	}
 
+	/* Ring the doorbell */
 	dma_wmb();
-
 	io_write32(odp_cpu_to_le_32(i), pkt_e1000e->mmio + E1000_RDT_OFFSET);
 }
 

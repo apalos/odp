@@ -550,6 +550,7 @@ static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num)
 	if (rxq->commit_pending >= 8) {
 		uint32_t val = rxq->doorbell_fl_key | (rxq->commit_pending / 8);
 
+		/* Ring the doorbell */
 		dma_wmb();
 		io_write32(odp_cpu_to_le_32(val), rxq->doorbell_fl);
 

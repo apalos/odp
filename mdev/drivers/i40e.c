@@ -41,7 +41,11 @@
 
 /** RX descriptor */
 typedef struct {
-	uint64_t padding[4];
+	odp_u64le_t addr;
+#define I40E_RXD_QW1_LEN_S 38
+#define I40E_RXD_QW1_LEN_M (0x3FFFULL << I40E_RXD_QW1_LEN_S)
+	odp_u64le_t status_error_len;
+	odp_u64le_t reserved[2];
 } i40e_rx_desc_t;
 
 /** RX queue data */
@@ -71,8 +75,8 @@ typedef struct {
 #define I40E_TXD_QW1_CMD_S	4
 #define I40E_TXD_QW1_L2TAG1_S	48
 #define I40E_TXD_QW1_OFFSET_S	16
-#define I40E_TXD_QW1_SIZE_S	34
-	odp_u64le_t cmd_type_offset_size;
+#define I40E_TXD_QW1_LEN_S	34
+	odp_u64le_t cmd_type_offset_len;
 } i40e_tx_desc_t;
 
 /** TX queue data */
@@ -114,7 +118,7 @@ typedef struct {
 	mdev_device_t mdev;		/**< Common mdev data */
 } pktio_ops_i40e_data_t;
 
-static void i40e_rx_refill(i40e_rx_queue_t *rxq, uint8_t num);
+static void i40e_rx_refill(i40e_rx_queue_t *rxq, uint16_t from, uint16_t num);
 static void i40e_wait_link_up(pktio_entry_t *pktio_entry);
 static int i40e_close(pktio_entry_t *pktio_entry);
 
@@ -180,7 +184,8 @@ static int i40e_rx_queue_register(pktio_ops_i40e_data_t *pkt_i40e,
 	rxq->rx_data_iova = rx_data.iova;
 	rxq->rx_data_size = rx_data.size;
 
-	i40e_rx_refill(rxq, rxq->rx_queue_len - 1);
+	/* Need 1 desc gap to keep tail from touching head */
+	i40e_rx_refill(rxq, 0, rxq->rx_queue_len - 1);
 
 	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
 	ODP_DBG("    RX descriptors: %u\n", rxq->rx_queue_len);
@@ -362,21 +367,83 @@ static int i40e_close(pktio_entry_t *pktio_entry)
 	return 0;
 }
 
-static void i40e_rx_refill(i40e_rx_queue_t *rxq ODP_UNUSED,
-			   uint8_t num ODP_UNUSED)
+static void i40e_rx_refill(i40e_rx_queue_t *rxq, uint16_t from, uint16_t num)
 {
+	uint16_t i = from;
+
+	while (num) {
+		uint64_t iova = rxq->rx_data_iova + i * I40E_RX_BUF_SIZE;
+		i40e_rx_desc_t *rxd = &rxq->rx_descs[i];
+
+		rxd->addr = odp_cpu_to_le_64(iova);
+		rxd->status_error_len = odp_cpu_to_le_64(0);
+
+		i++;
+		if (i >= rxq->rx_queue_len)
+			i = 0;
+
+		num--;
+	}
+
+	/* Ring the doorbell */
+	dma_wmb();
+	io_write32(odp_cpu_to_le_32(i), rxq->doorbell);
 }
 
 static int i40e_recv(pktio_entry_t *pktio_entry, int rxq_idx,
-		     odp_packet_t pkt_table[] ODP_UNUSED,
-		     int num ODP_UNUSED)
+		     odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_i40e_data_t *pkt_i40e = odp_ops_data(pktio_entry, i40e);
-	i40e_rx_queue_t *rxq ODP_UNUSED = &pkt_i40e->rx_queues[rxq_idx];
+	i40e_rx_queue_t *rxq = &pkt_i40e->rx_queues[rxq_idx];
+	uint16_t refill_from;
 	int rx_pkts = 0;
+	int ret;
 
 	if (!pkt_i40e->lockless_rx)
 		odp_ticketlock_lock(&pkt_i40e->rx_locks[rxq_idx]);
+
+	/* Keep track of the start point to refill RX queue */
+	refill_from = rxq->cidx;
+
+	while (rx_pkts < num) {
+		volatile i40e_rx_desc_t *rxd = &rxq->rx_descs[rxq->cidx];
+		odp_packet_hdr_t *pkt_hdr;
+		odp_packet_t pkt;
+		uint16_t pkt_len;
+		uint64_t status_error_len;
+
+		status_error_len = odp_le_to_cpu_64(rxd->status_error_len);
+		if (!status_error_len)
+			break;
+
+		pkt_len = (status_error_len & I40E_RXD_QW1_LEN_M) >>
+		    I40E_RXD_QW1_LEN_S;
+
+		pkt = odp_packet_alloc(pkt_i40e->pool, pkt_len);
+		if (odp_unlikely(pkt == ODP_PACKET_INVALID))
+			break;
+
+		pkt_hdr = odp_packet_hdr(pkt);
+
+		ret = odp_packet_copy_from_mem(pkt, 0, pkt_len,
+					       rxq->rx_data_base +
+					       rxq->cidx * I40E_RX_BUF_SIZE);
+		if (odp_unlikely(ret)) {
+			odp_packet_free(pkt);
+			break;
+		}
+
+		pkt_hdr->input = pktio_entry->s.handle;
+
+		rxq->cidx++;
+		if (odp_unlikely(rxq->cidx >= rxq->rx_queue_len))
+			rxq->cidx = 0;
+
+		pkt_table[rx_pkts] = pkt;
+		rx_pkts++;
+	}
+
+	i40e_rx_refill(rxq, refill_from, rx_pkts);
 
 	if (!pkt_i40e->lockless_rx)
 		odp_ticketlock_unlock(&pkt_i40e->rx_locks[rxq_idx]);
@@ -384,14 +451,14 @@ static int i40e_recv(pktio_entry_t *pktio_entry, int rxq_idx,
 	return rx_pkts;
 }
 
-static uint64_t txd_ctos(uint32_t cmd, uint32_t tag, uint32_t offset,
-			 uint32_t size)
+static uint64_t txd_ctol(uint32_t cmd, uint32_t tag, uint32_t offset,
+			 uint32_t len)
 {
 	return I40E_TXD_DTYPE_DATA |
 	    ((uint64_t)cmd << I40E_TXD_QW1_CMD_S) |
 	    ((uint64_t)tag << I40E_TXD_QW1_L2TAG1_S) |
 	    ((uint64_t)offset << I40E_TXD_QW1_OFFSET_S) |
-	    ((uint64_t)size << I40E_TXD_QW1_SIZE_S);
+	    ((uint64_t)len << I40E_TXD_QW1_LEN_S);
 }
 
 static int i40e_send(pktio_entry_t *pktio_entry, int txq_idx,
@@ -436,8 +503,8 @@ static int i40e_send(pktio_entry_t *pktio_entry, int txq_idx,
 				       txq->tx_data_base + offset);
 
 		txd->addr = odp_cpu_to_le_64(txq->tx_data_iova + offset);
-		txd->cmd_type_offset_size =
-		    odp_cpu_to_le_64(txd_ctos(txd_cmd, 0, 0, pkt_len));
+		txd->cmd_type_offset_len =
+		    odp_cpu_to_le_64(txd_ctol(txd_cmd, 0, 0, pkt_len));
 
 		txq->pidx += DIV_ROUND_UP(txd_len, sizeof(*txd));
 		if (odp_unlikely(txq->pidx >= txq->tx_queue_len))
