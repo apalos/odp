@@ -352,6 +352,9 @@ static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 	uint16_t budget = 0;
 	int rx_pkts = 0;
 
+	if (!pkt_e1000e->lockless_rx)
+		odp_ticketlock_lock(&pkt_e1000e->rx_lock);
+
 	/* Keep track of the start point to refill RX queue */
 	refill_from = pkt_e1000e->cidx;
 
@@ -409,6 +412,9 @@ static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 	}
 
 	e1000e_rx_refill(pkt_e1000e, refill_from, rx_pkts);
+
+	if (!pkt_e1000e->lockless_rx)
+		odp_ticketlock_unlock(&pkt_e1000e->rx_lock);
 
 	return rx_pkts;
 }
