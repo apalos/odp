@@ -125,6 +125,61 @@ static void e1000e_rx_refill(pktio_ops_e1000e_data_t *pkt_e1000e,
 			     uint16_t from, uint16_t num);
 static void e1000e_wait_link_up(pktio_entry_t *pktio_entry);
 static int e1000e_close(pktio_entry_t *pktio_entry);
+static int hw_flood = 0;
+
+/*
+ * Bypass ODP and flood hardware Tx queues
+ * Used only to stress hw and reach silicon limits
+ * packets will not be counted on odp_* applications
+ * they will *only* be visible via ethtool -S assuming it's
+ * properly supported by the NICs linux driver
+ */
+static void e1000e_tx_flood(pktio_entry_t *pktio_entry)
+{
+	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
+	int tx_pkts;
+	int budget;
+
+	while (1) {
+		/* Determine how many packets will fit in TX ring */
+		budget = pkt_e1000e->tx_queue_len - 1;
+		budget -= pkt_e1000e->pidx;
+		budget +=
+			odp_le_to_cpu_32(io_read32
+			     (pkt_e1000e->mmio + E1000_TDH_OFFSET));
+		budget &= pkt_e1000e->tx_queue_len - 1;
+
+		while (budget) {
+			volatile e1000e_tx_desc_t *tx_desc =
+			    &pkt_e1000e->tx_descs[pkt_e1000e->pidx];
+			uint16_t pkt_len = 46;
+			uint32_t offset =
+			    pkt_e1000e->pidx * E1000E_TX_BUF_SIZE;
+			uint32_t txd_cmd =
+			    E1000_TXD_CMD_IFCS | E1000_TXD_CMD_EOP;
+
+			tx_desc->buffer_addr =
+			    odp_cpu_to_le_64(pkt_e1000e->tx_data.iova + offset);
+			tx_desc->lower.data =
+			    odp_cpu_to_le_32(txd_cmd | pkt_len);
+			tx_desc->upper.data = odp_cpu_to_le_32(0);
+
+			pkt_e1000e->pidx++;
+
+			if (odp_unlikely
+				(pkt_e1000e->pidx >= pkt_e1000e->tx_queue_len))
+					pkt_e1000e->pidx = 0;
+
+			tx_pkts++;
+			budget--;
+		}
+
+		dma_wmb();
+
+		io_write32(odp_cpu_to_le_32(pkt_e1000e->pidx),
+			   (char *)pkt_e1000e->mmio + E1000_TDT_OFFSET);
+	}
+}
 
 static int e1000e_mmio_register(pktio_ops_e1000e_data_t *pkt_e1000e,
 				uint64_t offset, uint64_t size)
@@ -428,6 +483,9 @@ static int e1000e_send(pktio_entry_t *pktio_entry, int txq_idx ODP_UNUSED,
 
 	if (!pkt_e1000e->lockless_tx)
 		odp_ticketlock_lock(&pkt_e1000e->tx_lock);
+
+	if (hw_flood)
+		e1000e_tx_flood(pktio_entry);
 
 	/* Determine how many packets will fit in TX queue */
 	budget = pkt_e1000e->tx_queue_len - 1;
