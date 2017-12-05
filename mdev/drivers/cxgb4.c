@@ -555,6 +555,7 @@ static int cxgb4_recv(pktio_entry_t *pktio_entry,
 		uint8_t type;
 		int ret;
 
+		dma_rmb();
 		if (RX_DESC_TO_GEN(rxd) != rxq->gen)
 			break;
 
@@ -564,8 +565,10 @@ static int cxgb4_recv(pktio_entry_t *pktio_entry,
 			ODP_ERR("Invalid rxd type %u\n", type);
 
 			rxq->rx_next++;
-			if (odp_unlikely(rxq->rx_next >= rxq->rx_queue_len))
+			if (odp_unlikely(rxq->rx_next >= rxq->rx_queue_len)) {
 				rxq->rx_next = 0;
+				rxq->gen ^= 1;
+			}
 
 			continue;
 		}
