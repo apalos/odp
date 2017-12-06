@@ -279,6 +279,7 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	 * otherwise HW will think the free list is empty.
 	 */
 	cxgb4_rx_refill(rxq, rxq->free_list_len - 8);
+	rxq->cidx = rxq->free_list_len - 1;
 
 	ODP_DBG("Register RX queue region: 0x%llx@%016llx\n", size, offset);
 	ODP_DBG("    RX descriptors: %u\n", rxq->rx_queue_len);
@@ -548,12 +549,11 @@ static int cxgb4_recv(pktio_entry_t *pktio_entry,
 	if (!pkt_cxgb4->lockless_rx)
 		odp_ticketlock_lock(&pkt_cxgb4->rx_locks[rxq_idx]);
 
-	while (num) {
+	while (rx_pkts < num) {
 		volatile cxgb4_rx_desc_t *rxd = &rxq->rx_descs[rxq->rx_next];
 		odp_packet_t pkt;
-		uint32_t pkt_len, offset;
+		uint32_t pkt_len;
 		uint8_t type;
-		int ret;
 
 		dma_rmb();
 		if (RX_DESC_TO_GEN(rxd) != rxq->gen)
@@ -590,56 +590,19 @@ static int cxgb4_recv(pktio_entry_t *pktio_entry,
 			pkt_len ^= RX_DESC_NEW_BUF_FLAG;
 		}
 
-		/*
-		 * We can't stop from now on. In case of failure -- update RX
-		 * queue and free list properly and drop the packet.
-		 */
-		ret = 0;
+		if (odp_unlikely(rxq->offset + pkt_len > ODP_PAGE_SIZE)) {
+			/* TODO: reset the HW and reinit ? */
+			ODP_ABORT("Packet write beyond buffer boundary\n");
+		}
 
 		pkt = odp_packet_alloc(pkt_cxgb4->pool, pkt_len);
-		if (odp_unlikely(pkt == ODP_PACKET_INVALID))
-			ret = -1;
-
-		offset = 0;
-		while (offset < pkt_len) {
-			void *from =
-			    rxq->rx_data_base + rxq->cidx * ODP_PAGE_SIZE +
-			    rxq->offset;
-			uint32_t len =
-			    MIN(pkt_len - offset, ODP_PAGE_SIZE - rxq->offset);
-
-			if (odp_likely(!ret))
-				ret =
-				    odp_packet_copy_from_mem(pkt, offset, len,
-							     from);
-
-			offset += len;
-
-			rxq->offset +=
-			    ROUNDUP_ALIGN(len, pkt_cxgb4->free_list_align);
-
-			ODP_ASSERT(rxq->offset <= ODP_PAGE_SIZE);
-
-			if (rxq->offset >= ODP_PAGE_SIZE) {
-				rxq->cidx++;
-
-				if (odp_unlikely
-				    (rxq->cidx >= rxq->free_list_len))
-					rxq->cidx = 0;
-
-				rxq->offset = 0;
-				refill_count++;
-			}
-		}
-
-		rxq->rx_next++;
-		if (odp_unlikely(rxq->rx_next >= rxq->rx_queue_len)) {
-			rxq->rx_next = 0;
-			rxq->gen ^= 1;
-		}
-
-		if (odp_likely(!ret)) {
+		if (odp_likely(pkt != ODP_PACKET_INVALID)) {
 			odp_packet_hdr_t *pkt_hdr;
+
+			odp_packet_copy_from_mem(pkt, 0, pkt_len,
+						 rxq->rx_data_base +
+						 rxq->cidx * ODP_PAGE_SIZE +
+						 rxq->offset);
 
 			pkt_hdr = odp_packet_hdr(pkt);
 			pkt_hdr->input = pktio_entry->s.handle;
@@ -648,7 +611,14 @@ static int cxgb4_recv(pktio_entry_t *pktio_entry,
 			rx_pkts++;
 		}
 
-		num--;
+		rxq->offset +=
+		    ROUNDUP_ALIGN(pkt_len, pkt_cxgb4->free_list_align);
+
+		rxq->rx_next++;
+		if (odp_unlikely(rxq->rx_next >= rxq->rx_queue_len)) {
+			rxq->rx_next = 0;
+			rxq->gen ^= 1;
+		}
 	}
 
 	if (refill_count)
