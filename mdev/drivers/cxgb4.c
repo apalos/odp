@@ -599,10 +599,14 @@ static int cxgb4_recv(pktio_entry_t *pktio_entry,
 		if (odp_likely(pkt != ODP_PACKET_INVALID)) {
 			odp_packet_hdr_t *pkt_hdr;
 
-			odp_packet_copy_from_mem(pkt, 0, pkt_len,
+			/*
+			 * NIC is aligning L2 header on 4-byte boundary, hence
+			 * we need to strip 2 leading bytes.
+			 */
+			odp_packet_copy_from_mem(pkt, 0, pkt_len - 2,
 						 rxq->rx_data_base +
 						 rxq->cidx * ODP_PAGE_SIZE +
-						 rxq->offset);
+						 rxq->offset + 2);
 
 			pkt_hdr = odp_packet_hdr(pkt);
 			pkt_hdr->input = pktio_entry->s.handle;
