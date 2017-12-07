@@ -69,8 +69,10 @@ typedef struct {
 typedef struct {
 	cxgb4_rx_desc_t *rx_descs;	/**< RX queue base */
 
-	odp_u32le_t *doorbell;		/**< Free list refill doorbell */
-	uint32_t doorbell_key;		/**< 'Key' to the doorbell */
+	odp_u32le_t *doorbell_fl;	/**< Free list refill doorbell */
+	odp_u32le_t *doorbell_desc;	/**< Rx descriptor free doorbell */
+	uint32_t doorbell_fl_key;	/**< 'Key' to the doorbell */
+	uint32_t doorbell_desc_key;	/**< 'Key' to the doorbell */
 
 	uint16_t rx_queue_len;		/**< Number of RX desc entries */
 	uint16_t rx_next;		/**< Next RX desc to handle */
@@ -145,8 +147,8 @@ typedef struct {
 	cxgb4_tx_desc_t *tx_descs;	/**< TX queue base */
 	cxgb4_tx_queue_stats *stats;	/**< TX queue stats */
 
-	odp_u32le_t *doorbell;		/**< TX queue doorbell */
-	uint32_t doorbell_key;		/**< 'Key' to the doorbell */
+	odp_u32le_t *doorbell_desc;	/**< TX queue doorbell */
+	uint32_t doorbell_desc_key;	/**< 'Key' to the doorbell */
 
 	uint16_t tx_queue_len;		/**< Number of TX desc entries */
 	uint16_t tx_next;		/**< Next TX desc to insert */
@@ -212,7 +214,7 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 {
 	uint16_t rxq_idx = pkt_cxgb4->capa.max_input_queues++;
 	cxgb4_rx_queue_t *rxq = &pkt_cxgb4->rx_queues[rxq_idx];
-	uint32_t doorbell_offset;
+	uint32_t doorbell_fl_offset, doorbell_desc_offset;
 	struct iomem rx_data;
 	struct ethtool_ringparam ering;
 	char path[2048];
@@ -230,17 +232,33 @@ static int cxgb4_rx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	rxq->rx_queue_len = ering.rx_mini_pending;
 	rxq->free_list_len = ering.rx_pending + 8;
 
-	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_offset",
+	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_fl_offset",
 		 rxq_idx);
-	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &doorbell_offset) < 0) {
+	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &doorbell_fl_offset) < 0) {
 		ODP_ERR("Cannot get %s\n", path);
 		return -1;
 	}
-	rxq->doorbell = (odp_u32le_t *)(pkt_cxgb4->mmio + doorbell_offset);
+	rxq->doorbell_fl = (odp_u32le_t *)(pkt_cxgb4->mmio + doorbell_fl_offset);
 
-	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_key",
+	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_fl_key",
 		 rxq_idx);
-	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &rxq->doorbell_key) < 0) {
+	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &rxq->doorbell_fl_key) < 0) {
+		ODP_ERR("Cannot get %s\n", path);
+		return -1;
+	}
+
+	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_desc_offset",
+		 rxq_idx);
+	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &doorbell_desc_offset) < 0) {
+		ODP_ERR("Cannot get %s\n", path);
+		return -1;
+	}
+	rxq->doorbell_desc = (odp_u32le_t *)(pkt_cxgb4->mmio +
+			doorbell_desc_offset);
+
+	snprintf(path, sizeof(path) - 1, "queues/rx-%u/cxgb4/doorbell_desc_key",
+		 rxq_idx);
+	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &rxq->doorbell_desc_key) < 0) {
 		ODP_ERR("Cannot get %s\n", path);
 		return -1;
 	}
@@ -293,7 +311,7 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 {
 	uint16_t txq_idx = pkt_cxgb4->capa.max_output_queues++;
 	cxgb4_tx_queue_t *txq = &pkt_cxgb4->tx_queues[txq_idx];
-	uint32_t doorbell_offset;
+	uint32_t doorbell_desc_offset;
 	struct iomem tx_data;
 	struct ethtool_ringparam ering;
 	char path[2048];
@@ -310,17 +328,18 @@ static int cxgb4_tx_queue_register(pktio_ops_cxgb4_data_t *pkt_cxgb4,
 	}
 	txq->tx_queue_len = ering.tx_pending;
 
-	snprintf(path, sizeof(path) - 1, "queues/tx-%u/cxgb4/doorbell_offset",
+	snprintf(path, sizeof(path) - 1, "queues/tx-%u/cxgb4/doorbell_desc_offset",
 		 txq_idx);
-	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &doorbell_offset) < 0) {
+	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &doorbell_desc_offset) < 0) {
 		ODP_ERR("Cannot get %s\n", path);
 		return -1;
 	}
-	txq->doorbell = (odp_u32le_t *)(pkt_cxgb4->mmio + doorbell_offset);
+	txq->doorbell_desc = (odp_u32le_t *)(pkt_cxgb4->mmio +
+			doorbell_desc_offset);
 
-	snprintf(path, sizeof(path) - 1, "queues/tx-%u/cxgb4/doorbell_key",
+	snprintf(path, sizeof(path) - 1, "queues/tx-%u/cxgb4/doorbell_desc_key",
 		 txq_idx);
-	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &txq->doorbell_key) < 0) {
+	if (mdev_attr_u32_get(&pkt_cxgb4->mdev, path, &txq->doorbell_desc_key) < 0) {
 		ODP_ERR("Cannot get %s\n", path);
 		return -1;
 	}
@@ -529,10 +548,10 @@ static void cxgb4_rx_refill(cxgb4_rx_queue_t *rxq, uint8_t num)
 
 	/* We commit free list entries to HW in packs of 8 */
 	if (rxq->commit_pending >= 8) {
-		uint32_t val = rxq->doorbell_key | (rxq->commit_pending / 8);
+		uint32_t val = rxq->doorbell_fl_key | (rxq->commit_pending / 8);
 
 		dma_wmb();
-		io_write32(odp_cpu_to_le_32(val), rxq->doorbell);
+		io_write32(odp_cpu_to_le_32(val), rxq->doorbell_fl);
 
 		rxq->commit_pending &= 7;
 	}
@@ -625,6 +644,10 @@ static int cxgb4_recv(pktio_entry_t *pktio_entry,
 		}
 	}
 
+	if (rx_pkts)
+		io_write32(odp_cpu_to_le_32(rx_pkts | rxq->doorbell_desc_key),
+			   rxq->doorbell_desc);
+
 	if (refill_count)
 		cxgb4_rx_refill(rxq, refill_count);
 
@@ -666,6 +689,8 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 			tx_pkts++;
 			continue;
 		}
+
+		dma_rmb();
 
 		wr = (cxgb4_fw_eth_tx_pkt_wr_t *)txd;
 		cpl = (cxgb4_cpl_tx_pkt_core_t *)(wr + 1);
@@ -745,8 +770,8 @@ static int cxgb4_send(pktio_entry_t *pktio_entry,
 	dma_wmb();
 
 	/* Ring the doorbell */
-	io_write32(odp_cpu_to_le_32(txq->doorbell_key | tx_txds),
-		   txq->doorbell);
+	io_write32(odp_cpu_to_le_32(txq->doorbell_desc_key | tx_txds),
+		   txq->doorbell_desc);
 
 	if (!pkt_cxgb4->lockless_tx)
 		odp_ticketlock_unlock(&pkt_cxgb4->tx_locks[txq_idx]);
