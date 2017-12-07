@@ -16,6 +16,8 @@ void odp_hexdump(const uint8_t *data, size_t size)
 	char ascii[17];
 	size_t i, j;
 
+	printf("0000  ");
+
 	ascii[16] = '\0';
 
 	for (i = 0; i < size; ++i) {
@@ -25,6 +27,8 @@ void odp_hexdump(const uint8_t *data, size_t size)
 			printf(" ");
 			if ((i + 1) % 16 == 0) {
 				printf("|  %s\n", ascii);
+				if (i + 1 < size)
+					printf("%04lx  ", i + 1);
 			} else if (i + 1 == size) {
 				ascii[(i + 1) % 16] = '\0';
 				if ((i + 1) % 16 <= 8)
