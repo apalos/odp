@@ -26,7 +26,7 @@
 #define POOL_NUM_PKT           2048  /* Number of packets in packet pool */
 #define POOL_PKT_LEN           1856  /* Max packet length */
 #define DEFAULT_PKT_INTERVAL   1000  /* Interval between each packet */
-#define MAX_UDP_TX_BURST	1024
+#define MAX_UDP_TX_BURST	32
 #define MAX_RX_BURST		32
 
 #define APPL_MODE_UDP    0			/**< UDP mode */
