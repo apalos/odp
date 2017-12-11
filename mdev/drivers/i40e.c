@@ -69,8 +69,9 @@ typedef struct {
 
 #define I40E_TXD_DTYPE_DATA	0UL
 
-#define I40E_TXD_CMD_ICRC	0x0004UL
 #define I40E_TXD_CMD_EOP	0x0001UL
+#define I40E_TXD_CMD_RS		0x0002UL
+#define I40E_TXD_CMD_ICRC	0x0004UL
 
 #define I40E_TXD_QW1_CMD_S	4
 #define I40E_TXD_QW1_L2TAG1_S	48
@@ -498,6 +499,9 @@ static int i40e_send(pktio_entry_t *pktio_entry, int txq_idx,
 			tx_pkts++;
 			continue;
 		}
+
+		if (!(txq->pidx & ((txq->tx_queue_len >> 2) - 1)))
+			txd_cmd |= I40E_TXD_CMD_RS;
 
 		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
 				       txq->tx_data_base + offset);
