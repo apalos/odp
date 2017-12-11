@@ -567,6 +567,32 @@ static int e1000e_capability(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
+static int e1000e_input_queues_config(pktio_entry_t *pktio_entry,
+				      const odp_pktin_queue_param_t *p)
+{
+	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
+
+	if (p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
+		pkt_e1000e->lockless_rx = 1;
+	else
+		pkt_e1000e->lockless_rx = 0;
+
+	return 0;
+}
+
+static int e1000e_output_queues_config(pktio_entry_t *pktio_entry,
+				       const odp_pktout_queue_param_t *p)
+{
+	pktio_ops_e1000e_data_t *pkt_e1000e = odp_ops_data(pktio_entry, e1000e);
+
+	if (p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
+		pkt_e1000e->lockless_tx = 1;
+	else
+		pkt_e1000e->lockless_tx = 0;
+
+	return 0;
+}
+
 static pktio_ops_module_t e1000e_pktio_ops = {
 	.base = {
 		 .name = MODULE_NAME,
@@ -581,6 +607,9 @@ static pktio_ops_module_t e1000e_pktio_ops = {
 	.link_status = e1000e_link_status,
 
 	.capability = e1000e_capability,
+
+	.input_queues_config = e1000e_input_queues_config,
+	.output_queues_config = e1000e_output_queues_config,
 };
 
 /** e1000e module entry point */

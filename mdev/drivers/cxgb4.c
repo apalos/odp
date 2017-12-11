@@ -883,6 +883,32 @@ static int cxgb4_capability(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
+static int cxgb4_input_queues_config(pktio_entry_t *pktio_entry,
+				     const odp_pktin_queue_param_t *p)
+{
+	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
+
+	if (p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
+		pkt_cxgb4->lockless_rx = 1;
+	else
+		pkt_cxgb4->lockless_rx = 0;
+
+	return 0;
+}
+
+static int cxgb4_output_queues_config(pktio_entry_t *pktio_entry,
+				      const odp_pktout_queue_param_t *p)
+{
+	pktio_ops_cxgb4_data_t *pkt_cxgb4 = odp_ops_data(pktio_entry, cxgb4);
+
+	if (p->op_mode == ODP_PKTIO_OP_MT_UNSAFE)
+		pkt_cxgb4->lockless_tx = 1;
+	else
+		pkt_cxgb4->lockless_tx = 0;
+
+	return 0;
+}
+
 static pktio_ops_module_t cxgb4_pktio_ops = {
 	.base = {
 		 .name = MODULE_NAME,
@@ -897,6 +923,9 @@ static pktio_ops_module_t cxgb4_pktio_ops = {
 	.link_status = cxgb4_link_status,
 
 	.capability = cxgb4_capability,
+
+	.input_queues_config = cxgb4_input_queues_config,
+	.output_queues_config = cxgb4_output_queues_config,
 };
 
 /** cxgb4 module entry point */
