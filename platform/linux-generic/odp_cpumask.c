@@ -342,6 +342,7 @@ static void init_default_worker_cpumask(int control_cpus_default)
 	/* (Bits for all available CPUs are SET in worker cpumask) */
 
 	if (control_cpus_default) {
+#if 0
 		/*
 		 * The control cpumask was also unspecified...
 		 * CPU 0 is only used for workers on uniprocessor systems
@@ -356,6 +357,7 @@ static void init_default_worker_cpumask(int control_cpus_default)
 			 * reserve remaining CPUs for workers
 			 */
 			odp_cpumask_clr(worker_mask, 1);
+#endif
 	} else {
 		/*
 		 * The control cpumask was specified so first ensure

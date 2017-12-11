@@ -398,7 +398,7 @@ static int i40e_recv(pktio_entry_t *pktio_entry, int rxq_idx,
 	i40e_rx_queue_t *rxq = &pkt_i40e->rx_queues[rxq_idx];
 	uint16_t refill_from;
 	int rx_pkts = 0;
-	int ret;
+	// int ret;
 
 	if (!pkt_i40e->lockless_rx)
 		odp_ticketlock_lock(&pkt_i40e->rx_locks[rxq_idx]);
@@ -426,6 +426,7 @@ static int i40e_recv(pktio_entry_t *pktio_entry, int rxq_idx,
 
 		pkt_hdr = odp_packet_hdr(pkt);
 
+#if 0
 		ret = odp_packet_copy_from_mem(pkt, 0, pkt_len,
 					       rxq->rx_data_base +
 					       rxq->cidx * I40E_RX_BUF_SIZE);
@@ -433,6 +434,7 @@ static int i40e_recv(pktio_entry_t *pktio_entry, int rxq_idx,
 			odp_packet_free(pkt);
 			break;
 		}
+#endif
 
 		pkt_hdr->input = pktio_entry->s.handle;
 
@@ -503,8 +505,10 @@ static int i40e_send(pktio_entry_t *pktio_entry, int txq_idx,
 		if (!(txq->pidx & ((txq->tx_queue_len >> 2) - 1)))
 			txd_cmd |= I40E_TXD_CMD_RS;
 
-		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
+#if 1
+		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, 14 /* pkt_len */,
 				       txq->tx_data_base + offset);
+#endif
 
 		txd->addr = odp_cpu_to_le_64(txq->tx_data_iova + offset);
 		txd->cmd_type_offset_len =
@@ -527,7 +531,7 @@ static int i40e_send(pktio_entry_t *pktio_entry, int txq_idx,
 	if (!pkt_i40e->lockless_tx)
 		odp_ticketlock_unlock(&pkt_i40e->tx_locks[txq_idx]);
 
-	odp_packet_free_multi(pkt_table, tx_pkts);
+	// odp_packet_free_multi(pkt_table, tx_pkts);
 
 	return tx_pkts;
 }

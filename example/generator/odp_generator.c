@@ -669,6 +669,17 @@ static int gen_send_thread(void *arg)
 
 	odp_barrier_wait(&barrier);
 
+#if 1
+	/* Setup TX burst*/
+	if (setup_pkt_array(pktout_cfg, counters,
+			    pkt_ref_array, pkt_array,
+			    pkt_array_size, setup_pkt)) {
+		EXAMPLE_ERR("[%02i] Error: failed to setup packets\n",
+			    thr);
+		return -1;
+	}
+#endif
+
 	for (;;) {
 		if (thr_args->stop)
 			break;
@@ -678,6 +689,7 @@ static int gen_send_thread(void *arg)
 			continue;
 		}
 
+#if 0
 		/* Setup TX burst*/
 		if (setup_pkt_array(pktout_cfg, counters,
 				    pkt_ref_array, pkt_array,
@@ -686,6 +698,7 @@ static int gen_send_thread(void *arg)
 				    thr);
 			break;
 		}
+#endif
 
 		/* Send TX burst*/
 		for (burst_start = 0, burst_size = pkt_array_size;;) {
@@ -703,8 +716,10 @@ static int gen_send_thread(void *arg)
 				continue;
 			}
 			EXAMPLE_ERR("  [%02i] packet send failed\n", thr);
+#if 0
 			odp_packet_free_multi(&pkt_array[burst_start],
 					      burst_size);
+#endif
 			break;
 		}
 
