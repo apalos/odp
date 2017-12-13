@@ -410,7 +410,7 @@ static int e1000e_recv(pktio_entry_t *pktio_entry, int rxq_idx ODP_UNUSED,
 		odp_ticketlock_lock(&pkt_e1000e->rx_lock);
 
 	/* Keep track of the start point to refill RX queue */
-	refill_from = pkt_e1000e->cidx;
+	refill_from = rxq->cidx ? rxq->cidx - 1 : rxq->rx_queue_len - 1;
 
 	/*
 	 * Determine how many packets are available in RX queue:
