@@ -24,7 +24,7 @@ int mdev_get_iff_link(char *ifname)
 	int ret;
 
 	if (sockfd < 0) {
-		// ODP_ERR("Socket failed. Errno = %d\n", errno);
+		ODP_ERR("Socket failed. Errno = %d\n", errno);
 		return -1;
 	}
 
@@ -33,7 +33,7 @@ int mdev_get_iff_link(char *ifname)
 	close(sockfd);
 
 	if (ret < 0)  {
-		// ODP_ERR("ioctl failed. Errno = %d\n", errno);
+		ODP_ERR("ioctl failed. Errno = %d\n", errno);
 		return -1;
 	}
 
