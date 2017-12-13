@@ -252,6 +252,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   pktio/sysfs.c \
 			   pktio/tap.c \
 			   pktio/ring.c \
+			   pktio/null.c \
 			   pool/generic.c \
 			   pool/subsystem.c \
 			   odp_pkt_queue.c \
