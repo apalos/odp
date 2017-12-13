@@ -404,7 +404,7 @@ static int i40e_recv(pktio_entry_t *pktio_entry, int rxq_idx,
 		odp_ticketlock_lock(&pkt_i40e->rx_locks[rxq_idx]);
 
 	/* Keep track of the start point to refill RX queue */
-	refill_from = rxq->cidx;
+	refill_from = rxq->cidx ? rxq->cidx - 1 : rxq->rx_queue_len - 1;
 
 	while (rx_pkts < num) {
 		volatile i40e_rx_desc_t *rxd = &rxq->rx_descs[rxq->cidx];
@@ -446,7 +446,8 @@ static int i40e_recv(pktio_entry_t *pktio_entry, int rxq_idx,
 		rx_pkts++;
 	}
 
-	i40e_rx_refill(rxq, refill_from, rx_pkts);
+	if (rx_pkts)
+		i40e_rx_refill(rxq, refill_from, rx_pkts);
 
 	if (!pkt_i40e->lockless_rx)
 		odp_ticketlock_unlock(&pkt_i40e->rx_locks[rxq_idx]);
@@ -585,6 +586,12 @@ static int i40e_output_queues_config(pktio_entry_t *pktio_entry,
 	return 0;
 }
 
+static int i40e_mac_get(pktio_entry_t *pktio_entry ODP_UNUSED, void *mac_addr)
+{
+	memset(mac_addr, 0xa4, ETH_ALEN);
+	return ETH_ALEN;
+}
+
 static pktio_ops_module_t i40e_pktio_ops = {
 	.base = {
 		 .name = MODULE_NAME,
@@ -602,6 +609,8 @@ static pktio_ops_module_t i40e_pktio_ops = {
 
 	.input_queues_config = i40e_input_queues_config,
 	.output_queues_config = i40e_output_queues_config,
+
+	.mac_get = i40e_mac_get,
 };
 
 /** i40e module entry point */
