@@ -255,6 +255,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   pktio/mdev/cxgb4.c \
 			   pktio/mdev/e1000e.c \
 			   pktio/mdev/i40e.c \
+			   pktio/mdev/thunderx.c \
 			   pktio/netmap.c \
 			   pktio/ring.c \
 			   pktio/socket.c \
