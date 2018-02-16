@@ -55,6 +55,10 @@ struct odp_global_data_s {
 	odp_cpumask_t control_cpus;
 	odp_cpumask_t worker_cpus;
 	int num_cpus_installed;
+	int inotify_pcapng_fd;
+	int inotify_watch_fd;
+	pthread_t inotify_thread;
+	int inotify_pcapng_is_running;
 };
 
 enum init_stage {

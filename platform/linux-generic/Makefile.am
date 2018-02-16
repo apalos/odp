@@ -112,6 +112,7 @@ noinst_HEADERS = \
 		  include/odp_packet_socket.h \
 		  include/odp_packet_tap.h \
 		  include/odp_packet_null.h \
+		  include/odp_pcapng.h \
 		  include/odp_pkt_queue_internal.h \
 		  include/odp_pool_internal.h \
 		  include/odp_posix_extensions.h \
@@ -162,6 +163,7 @@ __LIB__libodp_linux_la_SOURCES = \
 			   odp_packet.c \
 			   odp_packet_flags.c \
 			   odp_packet_io.c \
+			   odp_pcapng.c \
 			   pktio/ethtool.c \
 			   pktio/io_ops.c \
 			   pktio/ipc.c \

@@ -25,6 +25,7 @@
 #include <odp_debug_internal.h>
 #include <odp_packet_io_ipc_internal.h>
 #include <odp/api/time.h>
+#include <odp_pcapng.h>
 
 #include <string.h>
 #include <inttypes.h>
@@ -485,6 +486,11 @@ int odp_pktio_start(odp_pktio_t hdl)
 		sched_fn->pktio_start(_odp_pktio_index(hdl), num, index, odpq);
 	}
 
+	if (ODP_PCAPNG) {
+		if (pcapng_prepare(entry))
+			pcapng_destroy(entry);
+	}
+
 	return res;
 }
 
@@ -506,6 +512,9 @@ static int _pktio_stop(pktio_entry_t *entry)
 		entry->s.state = PKTIO_STATE_STOP_PENDING;
 	else
 		entry->s.state = PKTIO_STATE_STOPPED;
+
+	if (ODP_PCAPNG)
+		pcapng_destroy(entry);
 
 	return res;
 }
@@ -1650,10 +1659,18 @@ int odp_pktout_queue(odp_pktio_t pktio, odp_pktout_queue_t queues[], int num)
 	return num_queues;
 }
 
+static inline void dump_pcapng_pkts(pktio_entry_t *entry, int qidx,
+				    const odp_packet_t packets[], int num)
+{
+	if (odp_unlikely(entry->s.pcapng.state[qidx] == PCAPNG_WR_PKT))
+		write_pcapng_pkts(entry, qidx, packets, num);
+}
+
 int odp_pktin_recv(odp_pktin_queue_t queue, odp_packet_t packets[], int num)
 {
 	pktio_entry_t *entry;
 	odp_pktio_t pktio = queue.pktio;
+	int ret;
 
 	entry = get_pktio_entry(pktio);
 	if (entry == NULL) {
@@ -1661,7 +1678,11 @@ int odp_pktin_recv(odp_pktin_queue_t queue, odp_packet_t packets[], int num)
 		return -1;
 	}
 
-	return entry->s.ops->recv(entry, queue.index, packets, num);
+	ret = entry->s.ops->recv(entry, queue.index, packets, num);
+	if (ODP_PCAPNG)
+		dump_pcapng_pkts(entry, queue.index, packets, ret);
+
+	return ret;
 }
 
 int odp_pktin_recv_tmo(odp_pktin_queue_t queue, odp_packet_t packets[], int num,
@@ -1683,12 +1704,19 @@ int odp_pktin_recv_tmo(odp_pktin_queue_t queue, odp_packet_t packets[], int num,
 		return -1;
 	}
 
-	if (entry->s.ops->recv_tmo && wait != ODP_PKTIN_NO_WAIT)
-		return entry->s.ops->recv_tmo(entry, queue.index, packets, num,
+	if (entry->s.ops->recv_tmo && wait != ODP_PKTIN_NO_WAIT) {
+		ret = entry->s.ops->recv_tmo(entry, queue.index, packets, num,
 					      wait);
+		if (ODP_PCAPNG)
+			dump_pcapng_pkts(entry, queue.index, packets, ret);
+
+		return ret;
+	}
 
 	while (1) {
 		ret = entry->s.ops->recv(entry, queue.index, packets, num);
+		if (ODP_PCAPNG)
+			dump_pcapng_pkts(entry, queue.index, packets, ret);
 
 		if (ret != 0)
 			return ret;
@@ -1733,6 +1761,7 @@ int odp_pktin_recv_mq_tmo(const odp_pktin_queue_t queues[], unsigned num_q,
 	int started = 0;
 	uint64_t sleep_round = 0;
 	int trial_successful = 0;
+	unsigned lfrom = 0;
 
 	for (i = 0; i < num_q; i++) {
 		ret = odp_pktin_recv(queues[i], packets, num);
@@ -1747,11 +1776,22 @@ int odp_pktin_recv_mq_tmo(const odp_pktin_queue_t queues[], unsigned num_q,
 	if (wait == 0)
 		return 0;
 
-	ret = sock_recv_mq_tmo_try_int_driven(queues, num_q, from,
+	ret = sock_recv_mq_tmo_try_int_driven(queues, num_q, &lfrom,
 					      packets, num, wait,
 					      &trial_successful);
-	if (trial_successful)
+	if (ret > 0 && from)
+		*from = lfrom;
+	if (trial_successful) {
+		if (ODP_PCAPNG) {
+			pktio_entry_t *entry;
+
+			entry = get_pktio_entry(queues[lfrom].pktio);
+			if (entry)
+				dump_pcapng_pkts(entry, lfrom, packets, ret);
+		}
+
 		return ret;
+	}
 
 	ts.tv_sec  = 0;
 	ts.tv_nsec = 1000 * SLEEP_USEC;
@@ -1815,6 +1855,9 @@ int odp_pktout_send(odp_pktout_queue_t queue, const odp_packet_t packets[],
 		ODP_DBG("pktio entry %d does not exist\n", pktio);
 		return -1;
 	}
+
+	if (ODP_PCAPNG)
+		dump_pcapng_pkts(entry, queue.index, packets, num);
 
 	return entry->s.ops->send(entry, queue.index, packets, num);
 }

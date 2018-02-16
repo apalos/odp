@@ -58,6 +58,7 @@ env:
         - CONF="--enable-schedule-scalable"
         - CONF="--enable-dpdk-zero-copy"
         - CONF="--disable-static-applications"
+        - CONF="--enable-pcapng-support"
         - DPDK_SHARED="y" CONF="--disable-static-applications"
 
 compiler:
