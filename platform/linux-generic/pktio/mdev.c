@@ -300,8 +300,7 @@ int mdev_dma_area_alloc(mdev_device_t *mdev, mdev_dma_area_t *dma_area)
 	req.argsz = sizeof(req);
 
 	tmp = mmap(NULL, dma_area->size, PROT_READ | PROT_WRITE,
-		   MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1,
-		   0);
+		   MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 	if (tmp == MAP_FAILED) {
 		ODP_ERR("mmap failed\n");
 		return -EFAULT;
