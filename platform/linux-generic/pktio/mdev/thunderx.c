@@ -28,27 +28,30 @@
 #include <pktio/common.h>
 #include <pktio/ethtool.h>
 #include <pktio/mdev.h>
-#include <pktio/sysfs.h>
 #include <pktio/uapi_net_mdev.h>
 
 #define MODULE_NAME "thunder-nicvf"
 
 /* RX queue definitions */
-#define THUNDERX_RX_QUEUE_NUM_MAX	32
-#define THUNDERX_RX_BUF_SIZE		2048UL
+#define THUNDERX_RX_QUEUE_NUM_MAX	8UL
+
+#define THUNDERX_RXQ_STATUS_OFFSET(rxq_idx)	(0x010440UL + ((rxq_idx) << 18))
+#define THUNDERX_RXQ_DOOR_OFFSET(rxq_idx)	(0x010438UL + ((rxq_idx) << 18))
 
 /** RX descriptor */
 typedef struct {
+	odp_u64le_t data[64];
 } thunderx_rx_desc_t;
 
 /** RX queue data */
 typedef struct ODP_ALIGNED_CACHE {
 	thunderx_rx_desc_t *rx_descs;	/**< RX queue base */
-	odp_u32le_t *doorbell;		/**< RX queue doorbell */
+	odp_u64le_t *doorbell;		/**< RX queue doorbell */
+
+	uint16_t cidx;			/**< Next RX desc to process */
+	odp_u64le_t *status;		/**< RX queue status */
 
 	uint16_t rx_queue_len;		/**< Number of RX desc entries */
-
-	mdev_dma_area_t rx_data;	/**< RX packet payload area */
 
 	odp_ticketlock_t lock;		/**< RX queue lock */
 } thunderx_rx_queue_t;
@@ -94,6 +97,20 @@ typedef struct ODP_ALIGNED_CACHE {
 	odp_ticketlock_t lock;		/**< TX queue lock */
 } thunderx_tx_queue_t;
 
+/* RX pool definitions */
+#define THUNDERX_RX_BUF_SIZE		2048UL
+#define THUNDERX_RX_POOL_DOOR_OFFSET	0x010C38UL
+#define THUNDERX_RX_POOL_LEN_DEFAULT	8192UL
+
+typedef struct ODP_ALIGNED_CACHE {
+	odp_u64le_t *bufs;		/**< RX buffers */
+	odp_u64le_t *doorbell;		/**< RX pool doorbell */
+	uint16_t pidx;			/**< Next RX buf to insert */
+	uint16_t len;			/**< RX pool length */
+	mdev_dma_area_t rx_data;	/**< RX packet payload area */
+	odp_ticketlock_t lock;		/**< RX pool lock */
+} thunderx_rx_pool_t;
+
 /** Packet socket using mediated thunderx device */
 typedef struct {
 	/** RX queue hot data */
@@ -101,6 +118,9 @@ typedef struct {
 
 	/** TX queue hot data */
 	thunderx_tx_queue_t tx_queues[THUNDERX_TX_QUEUE_NUM_MAX];
+
+	/** RX pool hot data */
+	thunderx_rx_pool_t rx_pool;
 
 	odp_pool_t pool;		/**< pool to alloc packets from */
 
@@ -116,6 +136,8 @@ typedef struct {
 	mdev_device_t mdev;		/**< Common mdev data */
 } pktio_ops_thunderx_data_t;
 
+static void thunderx_rx_refill(pktio_ops_thunderx_data_t *pkt_thunderx,
+			       uint16_t num);
 static void thunderx_wait_link_up(pktio_entry_t *pktio_entry);
 static int thunderx_close(pktio_entry_t *pktio_entry);
 
@@ -142,7 +164,6 @@ static int thunderx_rx_queue_register(pktio_ops_thunderx_data_t *pkt_thunderx,
 {
 	uint16_t rxq_idx = pkt_thunderx->capa.max_input_queues++;
 	thunderx_rx_queue_t *rxq = &pkt_thunderx->rx_queues[rxq_idx];
-	uint64_t doorbell_offset;
 	struct ethtool_ringparam ering;
 	int ret;
 
@@ -158,31 +179,19 @@ static int thunderx_rx_queue_register(pktio_ops_thunderx_data_t *pkt_thunderx,
 	}
 	rxq->rx_queue_len = ering.rx_pending;
 
-	ret = sysfs_attr_u64_get(&doorbell_offset,
-				 "/sys/class/net/%s"
-				 "/queues/rx-%u/thunderx/doorbell_offset",
-				 pkt_thunderx->mdev.if_name, rxq_idx);
-	if (ret) {
-		ODP_ERR("Cannot get %s rx-%u doorbell_offset\n",
-			pkt_thunderx->mdev.if_name, rxq_idx);
-		return -1;
-	}
-
 	rxq->doorbell =
-	    (odp_u32le_t *)(void *)(pkt_thunderx->mmio + doorbell_offset);
+	    (odp_u64le_t *)(void *)(pkt_thunderx->mmio +
+				    THUNDERX_RXQ_DOOR_OFFSET(rxq_idx));
+	rxq->status =
+	    (odp_u64le_t *)(void *)(pkt_thunderx->mmio +
+				    THUNDERX_RXQ_STATUS_OFFSET(rxq_idx));
 
-	ODP_ASSERT(rxq->rx_queue_len * sizeof(*rxq->rx_descs) <= size);
+
+	ODP_ASSERT(rxq->rx_queue_len * sizeof(*rxq->rx_descs) == size);
 
 	rxq->rx_descs = mdev_region_mmap(&pkt_thunderx->mdev, offset, size);
 	if (rxq->rx_descs == MAP_FAILED) {
 		ODP_ERR("Cannot mmap RX queue\n");
-		return -1;
-	}
-
-	rxq->rx_data.size = rxq->rx_queue_len * THUNDERX_RX_BUF_SIZE;
-	ret = mdev_dma_area_alloc(&pkt_thunderx->mdev, &rxq->rx_data);
-	if (ret) {
-		ODP_ERR("Cannot allocate RX queue DMA area\n");
 		return -1;
 	}
 
@@ -239,6 +248,45 @@ static int thunderx_tx_queue_register(pktio_ops_thunderx_data_t *pkt_thunderx,
 	return 0;
 }
 
+static int thunderx_rx_pool_register(pktio_ops_thunderx_data_t *pkt_thunderx,
+				     uint64_t offset, uint64_t size)
+{
+	thunderx_rx_pool_t *rx_pool = &pkt_thunderx->rx_pool;
+	int ret;
+
+	ODP_ASSERT(rx_pool->bufs == NULL);
+	ODP_ASSERT(THUNDERX_RX_POOL_LEN_DEFAULT * sizeof(*rx_pool->bufs) ==
+		   size);
+
+	odp_ticketlock_init(&rx_pool->lock);
+
+	rx_pool->bufs = mdev_region_mmap(&pkt_thunderx->mdev, offset, size);
+	if (rx_pool->bufs == MAP_FAILED) {
+		ODP_ERR("Cannot mmap RX pool\n");
+		return -1;
+	}
+
+	rx_pool->len = THUNDERX_RX_POOL_LEN_DEFAULT;
+
+	rx_pool->rx_data.size = rx_pool->len * THUNDERX_RX_BUF_SIZE;
+	ret = mdev_dma_area_alloc(&pkt_thunderx->mdev, &rx_pool->rx_data);
+	if (ret) {
+		ODP_ERR("Cannot allocate RX queue DMA area\n");
+		return -1;
+	}
+
+	rx_pool->doorbell = (odp_u64le_t *)(void *)(pkt_thunderx->mmio +
+		THUNDERX_RX_POOL_DOOR_OFFSET);
+
+	/* Need 1 desc gap to keep tail from touching head */
+	thunderx_rx_refill(pkt_thunderx, rx_pool->len - 1);
+
+	ODP_DBG("Register RX pool region: 0x%llx@%016llx\n", size, offset);
+	ODP_DBG("    RX buffers: %u\n", rx_pool->len);
+
+	return 0;
+}
+
 static int thunderx_region_info_cb(mdev_device_t *mdev,
 				   struct vfio_region_info *region_info)
 {
@@ -267,6 +315,11 @@ static int thunderx_region_info_cb(mdev_device_t *mdev,
 		return thunderx_tx_queue_register(pkt_thunderx,
 					      region_info->offset,
 					      region_info->size);
+
+	case VFIO_NET_MDEV_RX_BUFFER_POOL:
+		return thunderx_rx_pool_register(pkt_thunderx,
+						 region_info->offset,
+						 region_info->size);
 
 	default:
 		ODP_ERR("Unexpected region %u (class %u:%u)\n",
@@ -336,19 +389,16 @@ static int thunderx_close(pktio_entry_t *pktio_entry)
 
 	mdev_device_destroy(&pkt_thunderx->mdev);
 
-	for (i = 0; i < pkt_thunderx->capa.max_input_queues; i++) {
-		thunderx_rx_queue_t *rxq = &pkt_thunderx->rx_queues[i];
-
-		if (rxq->rx_data.size)
-			mdev_dma_area_free(&pkt_thunderx->mdev, &rxq->rx_data);
-	}
-
 	for (i = 0; i < pkt_thunderx->capa.max_output_queues; i++) {
 		thunderx_tx_queue_t *txq = &pkt_thunderx->tx_queues[i];
 
 		if (txq->tx_data.size)
 			mdev_dma_area_free(&pkt_thunderx->mdev, &txq->tx_data);
 	}
+
+	if (pkt_thunderx->rx_pool.rx_data.size)
+		mdev_dma_area_free(&pkt_thunderx->mdev,
+				   &pkt_thunderx->rx_pool.rx_data);
 
 	if (pkt_thunderx->sockfd != -1)
 		close(pkt_thunderx->sockfd);
@@ -358,19 +408,105 @@ static int thunderx_close(pktio_entry_t *pktio_entry)
 	return 0;
 }
 
+static void thunderx_rx_refill(pktio_ops_thunderx_data_t *pkt_thunderx,
+			       uint16_t num)
+{
+	thunderx_rx_pool_t *rx_pool = &pkt_thunderx->rx_pool;
+	uint16_t done = 0;
+
+	odp_ticketlock_lock(&rx_pool->lock);
+
+	while (done < num) {
+		uint64_t iova =
+		    rx_pool->rx_data.iova +
+		    rx_pool->pidx * THUNDERX_RX_BUF_SIZE;
+
+		rx_pool->bufs[rx_pool->pidx] = odp_cpu_to_le_64(iova);
+
+		rx_pool->pidx++;
+		if (rx_pool->pidx >= rx_pool->len)
+			rx_pool->pidx = 0;
+
+		done++;
+	}
+
+	/* Ring the doorbell */
+	odpdrv_mmio_u64le_write(num, rx_pool->doorbell);
+
+	odp_ticketlock_unlock(&rx_pool->lock);
+}
+
 static int thunderx_recv(pktio_entry_t *pktio_entry, int rxq_idx,
-			 odp_packet_t ODP_UNUSED pkt_table[],
-			 int ODP_UNUSED num)
+			 odp_packet_t pkt_table[], int num)
 {
 	pktio_ops_thunderx_data_t *pkt_thunderx = pktio_entry->s.ops_data;
 	thunderx_rx_queue_t *rxq = &pkt_thunderx->rx_queues[rxq_idx];
+	uint16_t rx_rxds = 0;
+	uint16_t budget;
 	int rx_pkts = 0;
+	int ret;
 
 	if (!pkt_thunderx->lockless_rx)
 		odp_ticketlock_lock(&rxq->lock);
 
+	/* Determine how many packets are available in RX queue */
+	budget = odp_le_to_cpu_64(*rxq->status) & UINT64_C(0xffff);
+
+	if (budget > num)
+		budget = num;
+
+	ret = odp_packet_alloc_multi(pkt_thunderx->pool, THUNDERX_RX_BUF_SIZE,
+				     pkt_table, budget);
+	budget = (ret > 0) ? ret : 0;
+
+	while (rx_pkts < budget) {
+		thunderx_rx_desc_t *rxd = &rxq->rx_descs[rxq->cidx];
+		odp_packet_hdr_t *pkt_hdr;
+		odp_packet_t pkt = pkt_table[rx_pkts];
+		odp_u16le_t *seg_len = (odp_u16le_t *)&rxd->data[3];
+		odp_u64le_t *seg_iova = (odp_u64le_t *)&rxd->data[7];
+		uint16_t pkt_len;
+		uint8_t *pkt_payload;
+
+		/* TODO: support multi-segment RX */
+		pkt_len = odp_le_to_cpu_16(seg_len[0]);
+		pkt_payload =
+		    (uint8_t *)odp_le_to_cpu_64(seg_iova[0]) +
+		    (pkt_thunderx->rx_pool.rx_data.vaddr -
+		    pkt_thunderx->rx_pool.rx_data.iova);
+
+		ret = odp_packet_copy_from_mem(pkt, 0, pkt_len, pkt_payload);
+					     
+
+		if (odp_unlikely(ret))
+			break;
+
+		pkt_hdr = odp_packet_hdr(pkt);
+		pkt_hdr->input = pktio_entry->s.handle;
+
+		rxq->cidx++;
+		if (odp_unlikely(rxq->cidx >= rxq->rx_queue_len))
+			rxq->cidx = 0;
+
+		rx_pkts++;
+		rx_rxds++;
+	}
+
+	/*
+	 * Ring the doorbell
+	 */
+	if (rx_pkts)
+		odpdrv_mmio_u64le_write(rx_rxds, rxq->doorbell);
+
 	if (!pkt_thunderx->lockless_rx)
 		odp_ticketlock_unlock(&rxq->lock);
+
+	/* TODO: aggregate */
+	if (rx_pkts)
+		thunderx_rx_refill(pkt_thunderx, rx_pkts);
+
+	if (rx_pkts < budget)
+		odp_packet_free_multi(pkt_table + rx_pkts, budget - rx_pkts);
 
 	return rx_pkts;
 }
