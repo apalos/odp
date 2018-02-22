@@ -31,7 +31,7 @@
 #include <pktio/sysfs.h>
 #include <pktio/uapi_net_mdev.h>
 
-#define MODULE_NAME "thunderx"
+#define MODULE_NAME "thunder-nicvf"
 
 /* RX queue definitions */
 #define THUNDERX_RX_QUEUE_NUM_MAX	32
