@@ -54,18 +54,40 @@ typedef struct ODP_ALIGNED_CACHE {
 } thunderx_rx_queue_t;
 
 /* TX queue definitions */
-#define THUNDERX_TX_QUEUE_NUM_MAX	32UL
+#define THUNDERX_TX_QUEUE_NUM_MAX	8UL
 #define THUNDERX_TX_BUF_SIZE		2048UL
+#define THUNDERX_TX_PACKET_LEN_MIN	ETH_ALEN
+
+#define THUNDERX_TXQ_HEAD_OFFSET(txq_idx) (0x010828UL + ((txq_idx) << 18))
+#define THUNDERX_TXQ_DOOR_OFFSET(txq_idx) (0x010838UL + ((txq_idx) << 18))
+
+/* Common TX descriptor field */
+#define TXD_QW0_TYPE_V(type)		(((type) & UINT64_C(0xf)) << 60)
+
+/* "Header" descriptor */
+#define TXD_TYPE_HEADER			UINT64_C(0x1)
+#define TXD_QW0_SUBDESC_COUNT_V(n)	(((n) & UINT64_C(0xff)) << 48)
+
+/* "Gather" descriptor */
+#define TXD_TYPE_GATHER			UINT64_C(0x4)
+#define TXD_QW0_SIZE_V(size)		((size) & UINT64_C(0xffff))
+#define TXD_QW1_ADDR_V(addr)		((addr) & UINT64_C(0x1ffffffffffff))
 
 typedef struct {
+	odp_u64le_t qw0;
+	odp_u64le_t qw1;
 } thunderx_tx_desc_t;
 
 /** TX queue data */
 typedef struct ODP_ALIGNED_CACHE {
 	thunderx_tx_desc_t *tx_descs;	/**< TX queue base */
-	odp_u32le_t *doorbell;		/**< TX queue doorbell */
+	odp_u64le_t *doorbell;		/**< TX queue doorbell */
 
 	uint16_t tx_queue_len;		/**< Number of TX desc entries */
+	uint16_t tx_txds_acc;		/**< TX descriptor accumulator */
+
+	uint16_t pidx;			/**< Next TX desc to insert */
+	odp_u64le_t *cidx;		/**< Last TX desc processed by HW */
 
 	mdev_dma_area_t tx_data;	/**< TX packet payload area */
 
@@ -175,7 +197,6 @@ static int thunderx_tx_queue_register(pktio_ops_thunderx_data_t *pkt_thunderx,
 {
 	uint16_t txq_idx = pkt_thunderx->capa.max_output_queues++;
 	thunderx_tx_queue_t *txq = &pkt_thunderx->tx_queues[txq_idx];
-	uint64_t doorbell_offset;
 	struct ethtool_ringparam ering;
 	int ret;
 
@@ -191,20 +212,10 @@ static int thunderx_tx_queue_register(pktio_ops_thunderx_data_t *pkt_thunderx,
 	}
 	txq->tx_queue_len = ering.tx_pending;
 
-	ret = sysfs_attr_u64_get(&doorbell_offset,
-				 "/sys/class/net/%s"
-				 "/queues/tx-%u/thunderx/doorbell_offset",
-				 pkt_thunderx->mdev.if_name, txq_idx);
-	if (ret) {
-		ODP_ERR("Cannot get %s tx-%u doorbell_offset\n",
-			pkt_thunderx->mdev.if_name, txq_idx);
-		return -1;
-	}
+	txq->doorbell = (odp_u64le_t *)(void *)(pkt_thunderx->mmio +
+					THUNDERX_TXQ_DOOR_OFFSET(txq_idx));
 
-	txq->doorbell =
-	    (odp_u32le_t *)(void *)(pkt_thunderx->mmio + doorbell_offset);
-
-	ODP_ASSERT(txq->tx_queue_len * sizeof(*txq->tx_descs) <= size);
+	ODP_ASSERT(txq->tx_queue_len * sizeof(*txq->tx_descs) == size);
 
 	txq->tx_descs = mdev_region_mmap(&pkt_thunderx->mdev, offset, size);
 	if (txq->tx_descs == MAP_FAILED) {
@@ -212,7 +223,10 @@ static int thunderx_tx_queue_register(pktio_ops_thunderx_data_t *pkt_thunderx,
 		return -1;
 	}
 
-	txq->tx_data.size = txq->tx_queue_len * THUNDERX_TX_BUF_SIZE;
+	txq->cidx = (odp_u64le_t *)(void *)(pkt_thunderx->mmio +
+				    THUNDERX_TXQ_HEAD_OFFSET(txq_idx));
+
+	txq->tx_data.size = txq->tx_queue_len * THUNDERX_TX_BUF_SIZE / 2;
 	ret = mdev_dma_area_alloc(&pkt_thunderx->mdev, &txq->tx_data);
 	if (ret) {
 		ODP_ERR("Cannot allocate TX queue DMA area\n");
@@ -366,10 +380,71 @@ static int thunderx_send(pktio_entry_t *pktio_entry, int txq_idx,
 {
 	pktio_ops_thunderx_data_t *pkt_thunderx = pktio_entry->s.ops_data;
 	thunderx_tx_queue_t *txq = &pkt_thunderx->tx_queues[txq_idx];
-	int tx_pkts = num;
+	uint16_t budget, tx_txds = 0;
+	int tx_pkts = 0;
 
 	if (!pkt_thunderx->lockless_tx)
 		odp_ticketlock_lock(&txq->lock);
+
+	/* Determine how many packets will fit in TX queue */
+	budget = txq->tx_queue_len - 2;
+	budget -= txq->pidx;
+	budget += odp_le_to_cpu_64(*txq->cidx) >> 4;
+	budget &= txq->tx_queue_len - 1;
+
+	while (tx_txds < budget && tx_pkts < num) {
+		uint16_t pkt_len = _odp_packet_len(pkt_table[tx_pkts]);
+		uint32_t offset = (txq->pidx >> 1) * THUNDERX_TX_BUF_SIZE;
+
+		thunderx_tx_desc_t *txd = &txq->tx_descs[txq->pidx];
+
+		/* Skip undersized packets silently */
+		if (odp_unlikely(pkt_len < THUNDERX_TX_PACKET_LEN_MIN)) {
+			tx_pkts++;
+			continue;
+		}
+
+		/* Skip oversized packets silently */
+		if (odp_unlikely(pkt_len > THUNDERX_TX_BUF_SIZE)) {
+			tx_pkts++;
+			continue;
+		}
+
+		odp_packet_copy_to_mem(pkt_table[tx_pkts], 0, pkt_len,
+				       (uint8_t *)txq->tx_data.vaddr + offset);
+
+		/* "Header" descriptor */
+		txd->qw0 =
+		    odp_cpu_to_le_64(TXD_QW0_TYPE_V(TXD_TYPE_HEADER) |
+				     TXD_QW0_SUBDESC_COUNT_V(1) |
+				     TXD_QW0_SIZE_V(pkt_len));
+
+		txd++;
+
+		/* "Gather" descriptor */
+		txd->qw0 =
+		    odp_cpu_to_le_64(TXD_QW0_TYPE_V(TXD_TYPE_GATHER) |
+				     TXD_QW0_SIZE_V(pkt_len));
+		txd->qw1 =
+		    odp_cpu_to_le_64(TXD_QW1_ADDR_V(txq->tx_data.iova +
+						    offset));
+
+		txq->pidx += 2;
+		if (odp_unlikely(txq->pidx >= txq->tx_queue_len))
+			txq->pidx = 0;
+
+		tx_txds += 2;
+		tx_pkts++;
+	}
+
+	/*
+	 * Ring the doorbell
+	 */
+	txq->tx_txds_acc += tx_txds;
+	if (txq->tx_txds_acc > 128) {
+		odpdrv_mmio_u64le_write(128, txq->doorbell);
+		txq->tx_txds_acc -= 128;
+	}
 
 	if (!pkt_thunderx->lockless_tx)
 		odp_ticketlock_unlock(&txq->lock);
