@@ -300,8 +300,7 @@ int mdev_dma_area_alloc(mdev_device_t *mdev, mdev_dma_area_t *dma_area)
 	req.argsz = sizeof(req);
 
 	tmp = mmap(NULL, dma_area->size, PROT_READ | PROT_WRITE,
-		   MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1,
-		   0);
+		   MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
 	if (tmp == MAP_FAILED) {
 		ODP_ERR("mmap failed\n");
 		return -EFAULT;
@@ -312,13 +311,15 @@ int mdev_dma_area_alloc(mdev_device_t *mdev, mdev_dma_area_t *dma_area)
 	req.vaddr = dma_area->vaddr;
 	req.size = dma_area->size;
 	req.flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE;
+	req.iova = MDEV_WINDOW_BASE + dma_area->vaddr;
+	dma_area->iova = req.iova;
 
-	if (ioctl(mdev->device, VFIO_IOMMU_MAP_DMA, &req) < 0) {
+	if (ioctl(mdev->container, VFIO_IOMMU_MAP_DMA, &req) < 0) {
 		ODP_ERR("ioctl failed\n");
+		if (munmap((void *)dma_area->vaddr, dma_area->size) < 0)
+			ODP_ERR("munmap failed\n");
 		return -EFAULT;
 	}
-
-	dma_area->iova = req.iova;
 
 	ODP_DBG("dma_area alloc: %llx@%llx -> %llx\n", dma_area->size,
 		dma_area->vaddr, dma_area->iova);
