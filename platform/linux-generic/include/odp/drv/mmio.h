@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#include <odp/api/byteorder.h>
+#include <odp/api/plat/byteorder_inlines.h>
 #include <odp/drv/byteorder.h>
 
 /** @ingroup odpdrv_mmio ODPDRV MMIO

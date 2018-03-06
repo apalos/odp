@@ -9,6 +9,7 @@
 
 #include <string.h>
 #include <errno.h>
+#include <linux/if_ether.h>
 
 /** Determine if a socket read/write error should be reported. Transient errors
  *  that simply require the caller to retry are ignored, the _send/_recv APIs

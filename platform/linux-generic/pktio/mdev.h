@@ -9,6 +9,7 @@
 
 #include <linux/vfio.h>
 #include <net/if.h>
+#include <odp_packet_internal.h>
 
 #define NET_MDEV_PREFIX "mdev:"
 #define MDEV_WINDOW_BASE 0x80000000UL
@@ -58,5 +59,10 @@ int vfio_get_region_sparse_mmaps(struct vfio_region_info *region_info,
 
 int mdev_dma_area_alloc(mdev_device_t *mdev, mdev_dma_area_t *dma_area);
 int mdev_dma_area_free(mdev_device_t *mdev, mdev_dma_area_t *dma_area);
+
+static inline odp_packet_hdr_t *odp_packet_hdr(odp_packet_t pkt)
+{
+	return (odp_packet_hdr_t *)(uintptr_t)pkt;
+}
 
 #endif
