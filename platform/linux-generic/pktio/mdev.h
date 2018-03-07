@@ -12,7 +12,6 @@
 #include <odp_packet_internal.h>
 
 #define NET_MDEV_PREFIX "mdev:"
-#define MDEV_WINDOW_BASE 0x80000000UL
 
 typedef struct {
 	uint16_t type;
